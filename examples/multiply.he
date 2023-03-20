@@ -1,0 +1,8 @@
+
+fn multiply (i32 x, i32 y) -> i32 {
+    -> x * y
+}
+
+fn main () {
+    printf("%d", multiply(3, 4))
+}

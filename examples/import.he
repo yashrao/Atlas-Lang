@@ -1,0 +1,28 @@
+//TODO: figure this out
+//NOTE: inspired from zig kinda not really
+const :: math = import("math")
+math.round(2.3)
+
+//import "math" as m
+const :: m = import("math")
+m.round(2.3)
+
+// import round from math
+//import "math" % round
+const :: round = import("math".round)
+    
+round(2.3)
+// import round from math
+import "math" % {
+    round
+    floor
+}
+
+round(2.3)
+floor(2.3)
+
+// import everything from math
+import "math" % *
+
+round(2.3)
+floor(2.3)

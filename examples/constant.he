@@ -1,0 +1,19 @@
+//syntax is:
+//[option[, option1...]][type] = VALUE
+
+static, i32 :: TEST 5
+// OR
+static, i32 :: TEST 5
+// OR
+static :: TEST 5
+
+main () -> int {
+    int :: CONSTANT 5
+    // OR
+    CONSTANT 5
+
+    char[10] :: LETTERS "abcdefghij"
+    // OR
+    LETTERS "abcdefghij"
+    CONSTANT = 6 // error
+}

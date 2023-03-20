@@ -1,0 +1,25 @@
+
+example () {
+    defer printf("this will be run last")
+
+    printf("this is run first")
+}
+
+example2 () {
+    // defer is LIFO order just like in golang
+    defer {
+        printf("this will be run second last")
+        printf("this will be run last")
+    }
+
+    defer printf("this will be run third last")
+
+    printf("this is run first")
+}
+
+main () {
+    example1()
+    example2()
+}
+
+

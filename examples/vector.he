@@ -1,0 +1,23 @@
+
+type Vector3 {
+    i32 :: x
+    i32 :: y
+    i32 :: z
+}
+// OR
+type Vector3 {
+    i32 :: x, y, x
+}
+
+main () {
+    :: test = Vector3 {1, 2, 3}
+    // Most likely the common way to instantiate variables
+    :: test = Vector3 {1, 2, 3}
+    // OR
+    Vector3 :: test = Vector3 {1, 2, 3}
+    // OR
+    Vector3 :: test
+    test.x = 1
+    test.y = 2
+    test.z = 3
+}

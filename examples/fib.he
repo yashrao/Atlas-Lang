@@ -1,0 +1,16 @@
+
+fib (i32 num) -> i32 {
+    if num == 0 {
+        return 0
+    } else if n == 1 {
+        return 1
+    } else {
+        return fib(n - 1) + fib(n - 2)
+    }
+}
+
+main() -> i32 {
+    :: num = fib(10)
+    "%d", res
+    -> 0
+}
