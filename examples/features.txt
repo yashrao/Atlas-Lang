@@ -1,3 +1,6 @@
 
 - Multiple return values
 - defer
+- switch AND match statements
+    - One acts as a regular switch
+    - the other acts so that you dont have to use break every time

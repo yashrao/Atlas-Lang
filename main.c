@@ -28,11 +28,35 @@ typedef enum TokenType {
     TK_NOT_EQUAL,
     TK_COMMA,
     TK_ARROW,
+    TK_DOT,
+    TK_QUOTE,
+    TK_SQUARE_OPEN,
+    TK_SQUARE_CLOSE
 } TokenType;
 
 typedef enum ErrorType {
     COMPILER = 200,
+    AST_CREATION,
 } ErrorType;
+
+typedef enum VarType {
+    TYPE_I8 = 300,
+    TYPE_I16,
+    TYPE_I32,
+    TYPE_I64,
+    TYPE_U8,
+    TYPE_U16,
+    TYPE_U32,
+    TYPE_U64,
+    TYPE_F8,
+    TYPE_F16,
+    TYPE_F32,
+    TYPE_F64,
+} VarType;
+
+typedef enum NodeType {
+    NODE_FUNC = 200,
+} NodeType;
 
 typedef struct Token {
     struct Token* head;
@@ -47,7 +71,33 @@ typedef struct Token {
 typedef struct Error {
     enum ErrorType type;
     Token* tok;
+    char* error_string;
 } Error;
+
+typedef struct ConstantNode {
+    Token* token;
+} ConstantNode;
+
+typedef struct VariableNode {
+    VarType* type;
+    Token* identifier;
+} VariableNode;
+
+typedef struct BlockNode {
+    
+} BlockNode;
+
+typedef struct FunctionNode {
+
+} FunctionNode;
+
+typedef struct Node {
+    NodeType nt;
+    union {
+        FunctionNode* func;
+        BlockNode* block;
+    } _node;
+} Node;
 
 static Error OK = (Error) {COMPILER, NULL};
 
@@ -98,6 +148,24 @@ const char* get_tt(TokenType tt) {
         break;
     case TK_ARROW:
         return "ARROW";
+        break;
+    case TK_DOT:
+        return "DOT";
+        break;
+    case TK_CONSTANT:
+        return "CONSTANT";
+        break;
+    case TK_COMMA:
+        return "COMMA";
+        break;
+    case TK_SQUARE_OPEN:
+        return "SQUARE_OPEN";
+        break;
+    case TK_SQUARE_CLOSE:
+        return "SQUARE_CLOSE";
+        break;
+    case TK_QUOTE:
+        return "QUOTE";
         break;
     default:
         return "UNKNOWN TOKEN TYPE";
@@ -156,6 +224,7 @@ bool is_delim(char c) {
     case '"':
     case '\'':
     case ',':
+    case '.':
         return true;
     default:
         return false;
@@ -201,8 +270,14 @@ Error lexer(char* src, int length, Token** token_head, Token** token_list) {
         if (is_delim(*end)) {
             if (beg != end) {
                 // that means there is identifier there, save it first
-                Token* new_token =
-                    create_token(beg, end - 1, line, column, TK_IDENTIFIER);
+                Token* new_token;
+                if (is_num(beg, end)) {
+                    new_token =
+                        create_token(beg, end - 1, line, column, TK_CONSTANT);
+                } else {
+                    new_token =
+                        create_token(beg, end - 1, line, column, TK_IDENTIFIER);
+                }
                 add_token(new_token, token_head, token_list);
                 beg = end;
             }
@@ -225,26 +300,31 @@ Error lexer(char* src, int length, Token** token_head, Token** token_list) {
                 column = 0;
             } else if (*end == '=' && *(end + 1) == '=') {
                 end ++;
+                i++;
                 Token* new_token =
                     create_token(beg, end, line, column, TK_EQUAL);
                 add_token(new_token, token_head, token_list);
             } else if (*end == '!' && *(end + 1) == '=') {
                 end++;
+                i++;
                 Token* new_token =
                     create_token(beg, end, line, column, TK_NOT_EQUAL);
                 add_token(new_token, token_head, token_list);
             } else if (*end == '-' && *(end + 1) == '>') {
                 end++;
+                i++;
                 Token* new_token =
                     create_token(beg, end, line, column, TK_ARROW);
                 add_token(new_token, token_head, token_list);
             } else if (*end == '<' && *(end + 1) == '=') {
                 end++;
+                i++;
                 Token* new_token =
                     create_token(beg, end, line, column, TK_LTE);
                 add_token(new_token, token_head, token_list);
             } else if (*end == '>' && *(end + 1) == '=') {
                 end++;
+                i++;
                 Token* new_token =
                     create_token(beg, end, line, column, TK_GTE);
                 add_token(new_token, token_head, token_list);
@@ -306,6 +386,29 @@ Error lexer(char* src, int length, Token** token_head, Token** token_list) {
                 Token *new_token =
                     create_token(beg, end, line, column, TK_GT);
                 add_token(new_token, token_head, token_list);
+            } else if (*end == '.') {
+                Token *new_token =
+                    create_token(beg, end, line, column, TK_DOT);
+                add_token(new_token, token_head, token_list);
+            } else if (*end == '[') {
+                Token *new_token =
+                    create_token(beg, end, line, column, TK_SQUARE_OPEN);
+                add_token(new_token, token_head, token_list);
+            } else if (*end == ']') {
+                Token *new_token =
+                    create_token(beg, end, line, column, TK_SQUARE_CLOSE);
+                add_token(new_token, token_head, token_list);
+            } else if (*end == '"') {
+                beg = end;
+                end++;
+                i++;
+                while(*end != '"') {
+                    end++;
+                    i++;
+                }
+                Token *new_token =
+                    create_token(beg, end, line, column, TK_QUOTE);
+                add_token(new_token, token_head, token_list);
             } else if (*end == ' ') {
                 //  Skip space
             }
@@ -359,6 +462,69 @@ char* read_src(const char* filename, int* count) {
     return src;
 }
 
+void expect(Token* tok, TokenType expected) {
+    if (tok->tt != expected) {
+        printf("[ERROR]: Expected %s but got %s\n",
+                get_tt(expected), get_tt(tok->tt));
+        exit(1);
+    } 
+}
+
+Error ast_create(Token** token_list, bool is_block) {
+    Token* current_token = *token_list;
+    while(current_token != NULL) {
+        if (current_token->tt == TK_NEWLINE) {
+            // skip
+        } else if (current_token->tt == TK_IDENTIFIER && !is_block) {
+            Token* name = current_token;
+            // Expect Function definition
+            current_token = current_token->next;
+            expect(current_token, TK_PAREN_OPEN);
+            // TODO: HANDLE ARGUMENTS 
+            current_token = current_token->next;
+            expect(current_token, TK_PAREN_CLOSE);
+
+            current_token = current_token->next;
+            Token* func_ret = NULL;
+            if (current_token->tt == TK_ARROW) {
+                //TODO: handle RETURN TYPE
+                current_token = current_token->next;
+                expect(current_token, TK_IDENTIFIER);
+                func_ret = current_token;
+                current_token = current_token->next;
+            }
+            
+            expect(current_token, TK_CURLY_OPEN);
+            //TODO: BLOCK START
+            *token_list = current_token;
+            ast_create(token_list, true);
+            // TODO: Constants
+            current_token = current_token->next;
+            expect(current_token, TK_CURLY_CLOSE);
+        }
+
+        if (is_block) {
+            if(current_token->tt == TK_IDENTIFIER) {
+                // type var decl
+                Token* type = current_token;
+                current_token = current_token->next;
+                expect(current_token, TK_DOUBLE_C);
+                current_token = current_token->next;
+                expect(current_token, TK_IDENTIFIER);
+                Token* identifier = current_token;
+                current_token = current_token->next;
+                expect(current_token, TK_ASSIGN);
+                // TODO: EXPRESSION NODE
+            }
+        }
+        current_token = current_token->next;
+        if (is_block) {
+            *token_list = current_token;
+        }
+    }
+    return OK;
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         print_usage();
@@ -371,4 +537,5 @@ int main(int argc, char** argv) {
     char* src = read_src(argv[1], &count);
     lexer(src, count, &token_head, &token_list);
     print_tokens(token_list);
+    ast_create(&token_list, false);
 }

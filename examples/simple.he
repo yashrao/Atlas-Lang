@@ -1,4 +1,3 @@
-fn main () {
+main () {
     i32 :: test = 5
-    :: test2 = 5
 }
