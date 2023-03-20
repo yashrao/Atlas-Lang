@@ -3,6 +3,17 @@
 #include <stdbool.h>
 #include <ctype.h>
 
+// Colors
+const char* CL_BLACK   = "\e[0;30m";
+const char* CL_RED     = "\e[0;31m";
+const char* CL_GREEN   = "\e[0;32m";
+const char* CL_YELLOW  = "\e[0;33m";
+const char* CL_BLUE    = "\e[0;34m";
+const char* CL_MAGENTA = "\e[0;35m";
+const char* CL_CYAN    = "\e[0;36m";
+const char* CL_WHITE   = "\e[0;37m";
+const char* CL_RESET   = "\e[0m";
+
 typedef enum TokenType {
     TK_NEWLINE = 100,
     TK_PLUS,
@@ -464,7 +475,8 @@ char* read_src(const char* filename, int* count) {
 
 void expect(Token* tok, TokenType expected) {
     if (tok->tt != expected) {
-        printf("[ERROR]: Expected %s but got %s\n",
+        printf("%s[ERROR]:%s Expected %s but got %s\n",
+                CL_RED, CL_RESET,
                 get_tt(expected), get_tt(tok->tt));
         exit(1);
     } 
