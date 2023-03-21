@@ -69,11 +69,16 @@ typedef enum VarType {
 
 typedef enum NodeType {
     NODE_FUNC = 200,
+    NODE_BLOCK,
+    NODE_ROOT,
+
+    // STMTs
+    NODE_VAR_DECL,
+    NODE_CALL,
+    NODE_ASSIGN,
     NODE_BINOP,
     NODE_CONSTANT,
     NODE_VAR,
-    NODE_BLOCK,
-    NODE_ROOT
 } NodeType;
 
 
@@ -139,6 +144,7 @@ typedef struct Node {
         BlockNode* block;
         AssignNode* assign;
         BinOpNode* binop;
+        VarDeclNode* var_decl;
         VariableNode* var;
         ConstantNode* constant;
     };
@@ -589,6 +595,17 @@ Node* ast_create_variable(VarType type, Token* identifier) {
     return ret;
 }
 
+Node* ast_create_var_decl_node(Node* lhs, Node* rhs, VarType type) {
+    Node* ret = calloc(1, sizeof(Node));
+    VarDeclNode* _node = calloc(1, sizeof(VarDeclNode));
+    _node->lhs = lhs;
+    _node->rhs = rhs;
+    _node->type = type;
+    ret->var_decl = _node;
+    ret->nt = NODE_VAR_DECL;
+    return ret;
+}
+
 int get_prec(TokenType tt) {
     switch(tt) {
     case TK_STAR:
@@ -669,6 +686,11 @@ Node* ast_create_expression(Token** token_list) {
     return ast_create_expr_prec(token_list, 0);
 }
 
+void ast_add_node(Node** ast, Node* add) {
+    (*ast)->next = add;
+    *ast = (*ast)->next;
+}
+
 Error ast_create(Token** token_list, Node** ast, bool is_block) {
     Token* current_token = *token_list;
     while(current_token != NULL) {
@@ -707,10 +729,10 @@ Error ast_create(Token** token_list, Node** ast, bool is_block) {
             if(current_token->tt == TK_IDENTIFIER) {
                 // type var decl
                 Token* tmp = current_token;
-                VarType type = get_var_type(current_token);
                 current_token = current_token->next;
                 //expect(current_token, TK_DOUBLE_C);
                 if (current_token->tt == TK_DOUBLE_C) {
+                    VarType type = get_var_type(current_token);
                     // Var decl
                     current_token = current_token->next;
                     expect(current_token, TK_IDENTIFIER);
@@ -727,6 +749,7 @@ Error ast_create(Token** token_list, Node** ast, bool is_block) {
                     }
                     current_token = *token_list;
                     expect(current_token, TK_NEWLINE);
+                    Node* var_decl = ast_create_var_decl_node(var, expr, type);
                     // Create VarDeclNode
                 } else if (current_token->tt == TK_ASSIGN) {
                     // var reassignment
