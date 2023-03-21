@@ -1,5 +1,6 @@
-# The Archon Programming Language
-Archon is aimed to be a statically typed compiled language and is aimed to be very similar to C. This is being made as a learning exercise and is currently under development.
+# The Atlas Programming Language
+**P.S. Name may not be final - but it is Atlas for now**
+Atlas is aimed to be a statically typed compiled language and is aimed to be very similar to C. This is being made as a learning exercise and is currently under development.
 
 The Compiler has just started development so it doesn't do anything as of yet:
 - [X] Parser 
@@ -23,3 +24,4 @@ main () {
     :: a, b = test_function(3) // a, b are assigned 3 and 3.0 respectively
 }
 ```
+
