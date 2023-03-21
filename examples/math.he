@@ -2,7 +2,7 @@
 
 // typecasting uses the "as" keyword
 //:: variable = 5.5 as int //5
-fn round (i32 x) -> i32 {
+round (i32 x) -> i32 {
     if x < 0.0 {
         -> (x - 0.5) as i32
     } else {
@@ -10,7 +10,7 @@ fn round (i32 x) -> i32 {
     }
 }
     
-fn is_positive (i32 num) -> bool { 
+is_positive (i32 num) -> bool { 
     if num > 0 {
        return true  // 0
     } else {
@@ -18,11 +18,11 @@ fn is_positive (i32 num) -> bool {
     }
 }
 
-fn test (i32 num) {
+test (i32 num) {
     fmt.println("Testing...")
 }
 
-fn main () {
+main () {
     test()
 
     printf("{}\n", is_positive(6.9))

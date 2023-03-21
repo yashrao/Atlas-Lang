@@ -1,9 +1,9 @@
 
-fn multiply (i32 a, i32 b) -> i32 {
+multiply (i32 a, i32 b) -> i32 {
     -> a * b
 }
 
-fn add_thirty (i32 num) -> i32 {
+add_thirty (i32 num) -> i32 {
     // 1..10 evaluates to an iterator
     // This pattern can be used with any iterator
     for i in 1..10 {
@@ -17,7 +17,7 @@ fn add_thirty (i32 num) -> i32 {
     -> num
 }
 
-fn main () {
+main () {
     :: res = add_thirty(50)
     printf(res) // 80
 }

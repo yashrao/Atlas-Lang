@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <string.h>
 
 // Colors
 const char* CL_BLACK   = "\e[0;30m";
@@ -63,11 +64,18 @@ typedef enum VarType {
     TYPE_F16,
     TYPE_F32,
     TYPE_F64,
+    TYPE_INVALID
 } VarType;
 
 typedef enum NodeType {
     NODE_FUNC = 200,
+    NODE_BINOP,
+    NODE_CONSTANT,
+    NODE_VAR,
+    NODE_BLOCK,
+    NODE_ROOT
 } NodeType;
+
 
 typedef struct Token {
     struct Token* head;
@@ -87,12 +95,33 @@ typedef struct Error {
 
 typedef struct ConstantNode {
     Token* token;
+    union {
+        int iVal;
+        float fVal;
+    };
 } ConstantNode;
 
 typedef struct VariableNode {
-    VarType* type;
+    VarType type;
     Token* identifier;
 } VariableNode;
+
+typedef struct BinOpNode {
+    struct Node* lhs;
+    struct Node* rhs;
+    Token* op;
+} BinOpNode;
+
+typedef struct AssignNode {
+    struct Node* lhs; // Variable Node
+    struct Node* rhs; // Expression Node
+} AssignNode;
+
+typedef struct VarDeclNode {
+    VarType type;
+    struct Node* lhs;
+    struct Node* rhs;
+} VarDeclNode;
 
 typedef struct BlockNode {
     
@@ -103,11 +132,16 @@ typedef struct FunctionNode {
 } FunctionNode;
 
 typedef struct Node {
+    struct Node* next;
     NodeType nt;
     union {
         FunctionNode* func;
         BlockNode* block;
-    } _node;
+        AssignNode* assign;
+        BinOpNode* binop;
+        VariableNode* var;
+        ConstantNode* constant;
+    };
 } Node;
 
 static Error OK = (Error) {COMPILER, NULL};
@@ -473,6 +507,12 @@ char* read_src(const char* filename, int* count) {
     return src;
 }
 
+void print_error_msg(const char* error) {
+    printf("%s[ERROR]:%s %s\n",
+            CL_RED, CL_RESET,
+            error);
+}
+
 void expect(Token* tok, TokenType expected) {
     if (tok->tt != expected) {
         printf("%s[ERROR]:%s Expected %s but got %s\n",
@@ -482,7 +522,83 @@ void expect(Token* tok, TokenType expected) {
     } 
 }
 
-Error ast_create(Token** token_list, bool is_block) {
+VarType get_var_type(Token* var_type) {
+    char* beg = var_type->beg;
+    char* end = var_type->end;
+    int n = 1;
+    while (beg != end) {
+        beg++;
+        n++;
+    }
+    if (strncmp(var_type->beg, "i8", n) == 0 && n == 2) {
+        return TYPE_I8;
+    } else if (strncmp(var_type->beg, "i16", n) == 0 && n == 3) {
+        return TYPE_I16;
+    } else if (strncmp(var_type->beg, "i32", n) == 0 && n == 3) {
+        return TYPE_I32;
+    } else if (strncmp(var_type->beg, "i64", n) == 0 && n == 3) {
+        return TYPE_I64;
+    } else if (strncmp(var_type->beg, "u8", n) == 0 && n == 2) {
+        return TYPE_U8;
+    } else if (strncmp(var_type->beg, "u16", n) == 0 && n == 3) {
+        return TYPE_U16;
+    } else if (strncmp(var_type->beg, "u32", n) == 0 && n == 3) {
+        return TYPE_U32;
+    } else if (strncmp(var_type->beg, "u64", n) == 0 && n == 3) {
+        return TYPE_U64;
+    } 
+
+    return TYPE_INVALID;
+}
+
+Node* ast_create_variable(VarType type, Token* identifier) {
+    Node* ret = calloc(1, sizeof(Node));
+    VariableNode* _node = calloc(1, sizeof(VariableNode));
+    ret->nt = NODE_VAR;
+    _node->type = type;
+    _node->identifier = identifier;
+    ret->var = _node;
+    return ret;
+}
+
+int get_prec(TokenType tt) {
+    switch(tt) {
+    case TK_STAR:
+    case TK_SLASH:
+        return 20;
+    case TK_PLUS:
+    case TK_DASH:
+        return 10;
+    default:
+        print_error_msg("Invalid Operator");
+        exit(1);
+    }
+}
+
+Node* ast_create_constant(Token* token) {
+    Node* ret = calloc(1, sizeof(Node));
+    ConstantNode* _node = calloc(1, sizeof(ConstantNode));
+
+    
+}
+
+Node* ast_create_expr_prec(Token** token_list, Node** ast, int precedence) {
+    Node* ret = calloc(1, sizeof(Node));
+    Token* op = (*token_list)->next; // operator is a lookahead
+    while(get_prec(op->tt) >= precedence) {
+        *token_list = (*token_list)->next;
+        if ((*token_list)->tt == TK_CONSTANT) {
+            Node* rhs = ast_create_constant();
+        }
+    }
+    return ret;
+}
+
+Node* ast_create_expression(Token** token_list, Node** ast) {
+    return ast_create_expr_prec(token_list, ast, 0);
+}
+
+Error ast_create(Token** token_list, Node** ast, bool is_block) {
     Token* current_token = *token_list;
     while(current_token != NULL) {
         if (current_token->tt == TK_NEWLINE) {
@@ -509,7 +625,7 @@ Error ast_create(Token** token_list, bool is_block) {
             expect(current_token, TK_CURLY_OPEN);
             //TODO: BLOCK START
             *token_list = current_token;
-            ast_create(token_list, true);
+            ast_create(token_list, ast, true);
             // TODO: Constants
             current_token = current_token->next;
             expect(current_token, TK_CURLY_CLOSE);
@@ -518,15 +634,26 @@ Error ast_create(Token** token_list, bool is_block) {
         if (is_block) {
             if(current_token->tt == TK_IDENTIFIER) {
                 // type var decl
-                Token* type = current_token;
+                Token* tmp = current_token;
+                VarType type = get_var_type(current_token);
                 current_token = current_token->next;
-                expect(current_token, TK_DOUBLE_C);
-                current_token = current_token->next;
-                expect(current_token, TK_IDENTIFIER);
-                Token* identifier = current_token;
-                current_token = current_token->next;
-                expect(current_token, TK_ASSIGN);
-                // TODO: EXPRESSION NODE
+                //expect(current_token, TK_DOUBLE_C);
+                if (current_token->tt == TK_DOUBLE_C) {
+                    // Var decl
+                    current_token = current_token->next;
+                    expect(current_token, TK_IDENTIFIER);
+                    Token* identifier = current_token;
+                    Node* var = ast_create_variable(type, identifier);
+                    current_token = current_token->next;
+                    expect(current_token, TK_ASSIGN);
+                    // TODO: EXPRESSION NODE
+                    current_token = current_token->next;
+                    // Create VarDeclNode
+                } else if (current_token->tt == TK_ASSIGN) {
+                    // var reassignment
+                    Token* name = tmp;
+                }
+
             }
         }
         current_token = current_token->next;
@@ -548,6 +675,9 @@ int main(int argc, char** argv) {
     Token* token_head = token_list;
     char* src = read_src(argv[1], &count);
     lexer(src, count, &token_head, &token_list);
+
+    Node* ast_root = calloc(1, sizeof(Node));
+    ast_root->nt = NODE_ROOT;
     print_tokens(token_list);
-    ast_create(&token_list, false);
+    ast_create(&token_list, &ast_root, false);
 }

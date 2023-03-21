@@ -10,7 +10,6 @@ type Vector3 {
 }
 
 main () {
-    :: test = Vector3 {1, 2, 3}
     // Most likely the common way to instantiate variables
     :: test = Vector3 {1, 2, 3}
     // OR

@@ -1,4 +1,4 @@
-//syntax is:
+}//syntax is:
 //[option[, option1...]][type] = VALUE
 
 static, i32 :: TEST 5
