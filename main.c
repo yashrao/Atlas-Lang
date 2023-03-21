@@ -243,6 +243,40 @@ void print_tokens(Token* token_list) {
     }
 }
 
+void print_tabs(int level) {
+    for (int i = 0; i < level * 4; i++) {
+        printf(" ");
+    }
+}
+
+void print_error_msg(const char* error) {
+    printf("%s[ERROR]:%s %s\n",
+            CL_RED, CL_RESET,
+            error);
+}
+
+void print_node(Node* node, int tab_level) {
+    printf("[DEBUG]: ");
+    print_tabs(tab_level);
+    printf("%s└─%s", CL_YELLOW, CL_RESET);
+    printf(" ");
+    switch(node->nt) {
+    case NODE_BINOP:
+        printf("BinOpNode <%c>", *(node->binop->op->beg));
+        printf("\n");
+        print_node(node->binop->lhs, tab_level + 1);
+        print_node(node->binop->rhs, tab_level + 1);
+        break;
+    case NODE_CONSTANT:
+        printf("ConstantNode <%d>", node->constant->iVal);
+        break;
+    default:
+        print_error_msg("Something has horribly gone wrong");
+        break;
+    }
+    printf("\n");
+}
+
 void fatal(const char* string) {
     printf("%s", string);
     exit(1);
@@ -507,12 +541,6 @@ char* read_src(const char* filename, int* count) {
     return src;
 }
 
-void print_error_msg(const char* error) {
-    printf("%s[ERROR]:%s %s\n",
-            CL_RED, CL_RESET,
-            error);
-}
-
 void expect(Token* tok, TokenType expected) {
     if (tok->tt != expected) {
         printf("%s[ERROR]:%s Expected %s but got %s\n",
@@ -565,10 +593,12 @@ int get_prec(TokenType tt) {
     switch(tt) {
     case TK_STAR:
     case TK_SLASH:
-        return 20;
+        return 2;
     case TK_PLUS:
     case TK_DASH:
-        return 10;
+        return 1;
+    case TK_NEWLINE:
+        return -1;
     default:
         print_error_msg("Invalid Operator");
         exit(1);
@@ -578,24 +608,65 @@ int get_prec(TokenType tt) {
 Node* ast_create_constant(Token* token) {
     Node* ret = calloc(1, sizeof(Node));
     ConstantNode* _node = calloc(1, sizeof(ConstantNode));
-
-    
-}
-
-Node* ast_create_expr_prec(Token** token_list, Node** ast, int precedence) {
-    Node* ret = calloc(1, sizeof(Node));
-    Token* op = (*token_list)->next; // operator is a lookahead
-    while(get_prec(op->tt) >= precedence) {
-        *token_list = (*token_list)->next;
-        if ((*token_list)->tt == TK_CONSTANT) {
-            Node* rhs = ast_create_constant();
-        }
-    }
+    _node->iVal = atoi(token->beg);
+    ret->nt = NODE_CONSTANT;
+    ret->constant = _node;
     return ret;
 }
 
-Node* ast_create_expression(Token** token_list, Node** ast) {
-    return ast_create_expr_prec(token_list, ast, 0);
+Node* ast_create_binop(Node* lhs, Node* rhs, Token* op) {
+    Node* ret = calloc(1, sizeof(BinOpNode));
+    BinOpNode* _node = calloc(1, sizeof(BinOpNode));
+    _node->lhs = lhs;
+    _node->rhs = rhs;
+    _node->op = op;
+    ret->binop = _node;
+    ret->nt = NODE_BINOP;
+    return ret;
+}
+
+Node* ast_create_expr_prec(Token** token_list, int precedence) {
+    Node* lhs = ast_create_constant(*token_list);
+    Token* lookahead = (*token_list)->next; // operator is a lookahead
+    Node* rhs = NULL;
+    if ((*token_list)->tt == TK_NEWLINE) {
+        print_error_msg("Expected an Expression but got a NEWLINE");
+        exit(1);
+    }
+    while(get_prec(lookahead->tt) >= precedence) {
+        *token_list = (*token_list)->next; // op
+        Token* op = *token_list; // operator is a lookahead
+        *token_list = (*token_list)->next; // rhs
+        if ((*token_list)->tt == TK_CONSTANT) {
+            rhs = ast_create_constant(*token_list);
+        }
+        lookahead = (*token_list)->next;
+        // TODO: handle left associativity
+        printf("LOOKAHEAD\n");
+        print_token(lookahead);
+        print_token(op);
+        while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
+            if (get_prec(lookahead->tt) > get_prec(op->tt))
+                rhs = ast_create_expr_prec(token_list, get_prec(op->tt) + 1);
+            else
+                rhs = ast_create_expr_prec(token_list, get_prec(op->tt));
+            *token_list = (*token_list)->next;
+            if ((*token_list)->tt == TK_NEWLINE) {
+                break;
+            }
+            lookahead = (*token_list)->next;
+        }
+        lhs = ast_create_binop(lhs, rhs, op);
+        if ((*token_list)->tt == TK_NEWLINE || (*token_list)->next->tt == TK_NEWLINE) {
+            break;
+        }
+    }
+    print_node(lhs, 0);
+    return lhs;
+}
+
+Node* ast_create_expression(Token** token_list) {
+    return ast_create_expr_prec(token_list, 0);
 }
 
 Error ast_create(Token** token_list, Node** ast, bool is_block) {
@@ -623,11 +694,12 @@ Error ast_create(Token** token_list, Node** ast, bool is_block) {
             }
             
             expect(current_token, TK_CURLY_OPEN);
+            current_token = current_token->next;
             //TODO: BLOCK START
             *token_list = current_token;
             ast_create(token_list, ast, true);
             // TODO: Constants
-            current_token = current_token->next;
+            current_token = *token_list;
             expect(current_token, TK_CURLY_CLOSE);
         }
 
@@ -648,6 +720,13 @@ Error ast_create(Token** token_list, Node** ast, bool is_block) {
                     expect(current_token, TK_ASSIGN);
                     // TODO: EXPRESSION NODE
                     current_token = current_token->next;
+                    *token_list = current_token;
+                    Node* expr = ast_create_expression(token_list);
+                    if ((*token_list)->next->tt == TK_NEWLINE) {
+                        *token_list = (*token_list)->next;
+                    }
+                    current_token = *token_list;
+                    expect(current_token, TK_NEWLINE);
                     // Create VarDeclNode
                 } else if (current_token->tt == TK_ASSIGN) {
                     // var reassignment
@@ -659,6 +738,9 @@ Error ast_create(Token** token_list, Node** ast, bool is_block) {
         current_token = current_token->next;
         if (is_block) {
             *token_list = current_token;
+        }
+        if (current_token == NULL || current_token->tt == TK_CURLY_CLOSE) {
+            break;
         }
     }
     return OK;
