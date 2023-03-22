@@ -1,8 +1,0 @@
-
-multiply (i32 x, i32 y) -> i32 {
-    -> x * y
-}
-
-main () {
-    printf("%d", multiply(3, 4))
-}

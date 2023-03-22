@@ -1,5 +1,0 @@
-%macro PI -> 3.1415926535897932
-    
-%macro area_of_circle(R) -> PI * R * R
-
-puts(area_of_circle(10)) // expands to puts(3.14.. * 10 * 10)
