@@ -9,7 +9,7 @@ The Compiler has just started development so it doesn't do anything as of yet:
 - [ ] Codegen (either LLVM or NASM)
 
 ## Planned Design
-Below are some sample programs that have been written to encapsulate what kind of syntax Archon will have
+Below are some sample programs that have been written to encapsulate what kind of syntax Atlas will have
 ```C
 test_function(int x) -> int, int {
     -> x, x as f32 // -> arrow used for return, as keyword used for typecasting
