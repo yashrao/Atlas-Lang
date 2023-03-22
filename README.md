@@ -23,8 +23,8 @@ Below are some sample programs that have been written to encapsulate what kind o
 Note: These are not working examples due to repeating variable declarations
 ```C
 // variable.atl
-test_function(int x) -> int, int {
-    -> x, x as f32 // -> arrow used for return, as keyword used for typecasting
+test_function(int x) -> int, float {
+    -> x, x as float // -> arrow used for return, as keyword used for typecasting
 }
 
 main () {

@@ -1,9 +1,9 @@
-test_function(i32 x) -> i32, f32 {
+test_function(int x) -> int, float {
     -> x, x as f32
 }
 
 main () {
-    i32 :: a = 69
+    int :: a = 69
     // OR
     :: a = 69
 
