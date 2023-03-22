@@ -1,0 +1,30 @@
+type Error {
+    string :: msg
+    int :: error_value
+}
+
+check (Error error) {
+    if error.error_value != 0 {
+       std.printf("%s", error.msg)
+        std.exit(1)
+    }
+}
+
+test_function (int x) -> int, Error {
+    if x == 2 {
+        -> 3, Error{"", 0}
+    } else {
+        -> 4, Error{"This is an error", 1}
+    }
+}
+
+main (int argc, vector<string> argv) -> int {
+    :: res, err = test_function(2)
+    check(err)
+    std.printf("%d", res) // 2
+
+    res, err = test_function(3)
+    check(err) // prints error message and exits
+    -> 0
+}
+

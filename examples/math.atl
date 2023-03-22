@@ -1,0 +1,32 @@
+//import "core/fmt"
+
+// typecasting uses the "as" keyword
+//:: variable = 5.5 as int //5
+round (i32 x) -> i32 {
+    if x < 0.0 {
+        -> (x - 0.5) as i32
+    } else {
+        -> (x + 0.5) as i32
+    }
+}
+    
+is_positive (i32 num) -> bool { 
+    if num > 0 {
+       return true  // 0
+    } else {
+       return false // 1
+    }
+}
+
+test (i32 num) {
+    fmt.println("Testing...")
+}
+
+main () {
+    test()
+
+    printf("{}\n", is_positive(6.9))
+    printf("{}\n", round(5.5))
+    printf("{}\n", 69)
+    return 0
+}

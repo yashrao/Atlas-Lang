@@ -1,0 +1,7 @@
+test (i32 a, i32 b) -> i32 {
+    -> a + b
+}
+
+main() {
+    :: res = test(5) // 5
+}

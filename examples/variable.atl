@@ -1,0 +1,11 @@
+test_function(i32 x) -> i32, f32 {
+    -> x, x as f32
+}
+
+main () {
+    i32 :: a = 69
+    // OR
+    :: a = 69
+
+    :: a, b = test_function(3) // a, b are assigned 3 and 3.0 respectively
+}

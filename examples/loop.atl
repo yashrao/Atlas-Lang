@@ -1,0 +1,24 @@
+
+multiply (i32 a, i32 b) -> i32 {
+    -> a * b
+}
+
+add_thirty (i32 num) -> i32 {
+    // 1..10 evaluates to an iterator
+    // This pattern can be used with any iterator
+    for ::i = 0; i < 10; i += 1 {
+        num = num + 1 // 10
+    }
+    
+    :: max = 20
+    for ::i = 0; i < max; i += 1 {
+        num = num + 1 // 30
+    }
+    -> num
+}
+
+main () {
+    :: res = add_thirty(50)
+    printf(res) // 80
+}
+
