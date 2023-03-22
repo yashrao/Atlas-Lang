@@ -64,6 +64,7 @@ typedef enum VarType {
     TYPE_F16,
     TYPE_F32,
     TYPE_F64,
+    TYPE_UNKNOWN,
     TYPE_INVALID
 } VarType;
 
@@ -128,12 +129,20 @@ typedef struct VarDeclNode {
     struct Node* rhs;
 } VarDeclNode;
 
+typedef struct Scope {
+    struct Scope* parent_scope;
+    struct Node* names;
+} Scope;
+
 typedef struct BlockNode {
-    
+    struct Scope* scope;
+    struct Node* statements;
 } BlockNode;
 
 typedef struct FunctionNode {
-
+    Token* name;
+    struct Node* args; // VariableNodes
+    struct Node* block;
 } FunctionNode;
 
 typedef struct Node {
@@ -252,6 +261,9 @@ void print_tokens(Token* token_list) {
 void print_tabs(int level) {
     for (int i = 0; i < level * 4; i++) {
         printf(" ");
+        if (i % 4 == 0) {
+            printf("%s│%s", CL_YELLOW, CL_RESET);
+        }
     }
 }
 
@@ -261,26 +273,72 @@ void print_error_msg(const char* error) {
             error);
 }
 
+void print_token_str(Token* token) {
+    char* beg = token->beg;
+    while (beg != token->end) {
+        printf("%c", *beg);
+        beg++;
+    }
+    printf("%c", *beg);
+}
+
 void print_node(Node* node, int tab_level) {
     printf("[DEBUG]: ");
     print_tabs(tab_level);
-    printf("%s└─%s", CL_YELLOW, CL_RESET);
+    printf(" %s├─%s", CL_YELLOW, CL_RESET);
     printf(" ");
     switch(node->nt) {
     case NODE_BINOP:
-        printf("BinOpNode <%c>", *(node->binop->op->beg));
+        printf("%sBinOpNode%s <%c>",
+               CL_CYAN,
+               CL_RESET,
+               *(node->binop->op->beg));
         printf("\n");
         print_node(node->binop->lhs, tab_level + 1);
         print_node(node->binop->rhs, tab_level + 1);
         break;
     case NODE_CONSTANT:
-        printf("ConstantNode <%d>", node->constant->iVal);
+        printf("%sConstantNode%s <%d>",
+               CL_CYAN,
+               CL_RESET,
+               node->constant->iVal);
+        printf("\n");
         break;
-    default:
-        print_error_msg("Something has horribly gone wrong");
+    case NODE_BLOCK: {
+        printf("%sBlockNode%s\n", CL_CYAN, CL_RESET);
+        Node* current_node = node->block->statements;
+        current_node = current_node->next; // skip root node
+        while (current_node != NULL) {
+            print_node(current_node, tab_level + 1);
+            current_node = current_node->next;
+        }
         break;
     }
-    printf("\n");
+    case NODE_VAR_DECL:
+        printf("%sVarDeclNode%s\n", CL_CYAN, CL_RESET);
+        print_node(node->var_decl->lhs, tab_level + 1);
+        print_node(node->var_decl->rhs, tab_level + 1);
+        break;
+    case NODE_FUNC: {
+        printf("%sFuncNode%s <\"", CL_CYAN, CL_RESET);
+        print_token_str(node->func->name);
+        printf("\">\n");
+        print_node(node->func->block, tab_level + 1);
+        break;
+    }
+    case NODE_VAR: {
+        printf("%sVariableNode%s <\"", CL_CYAN, CL_RESET);
+        print_token_str(node->var->identifier);
+        printf("\">");
+        printf("\n");
+        break;
+    }
+    default:
+        print_error_msg("Something has horribly gone wrong");
+        printf("%d\n", node->nt);
+        break;
+    }
+    //printf("\n");
 }
 
 void fatal(const char* string) {
@@ -542,7 +600,6 @@ char* read_src(const char* filename, int* count) {
         src[i] = c;
         i++;
     }
-
     print_src(src);
     return src;
 }
@@ -659,9 +716,9 @@ Node* ast_create_expr_prec(Token** token_list, int precedence) {
         }
         lookahead = (*token_list)->next;
         // TODO: handle left associativity
-        printf("LOOKAHEAD\n");
-        print_token(lookahead);
-        print_token(op);
+        //printf("LOOKAHEAD\n");
+        //print_token(lookahead);
+        //print_token(op);
         while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
             if (get_prec(lookahead->tt) > get_prec(op->tt))
                 rhs = ast_create_expr_prec(token_list, get_prec(op->tt) + 1);
@@ -678,7 +735,7 @@ Node* ast_create_expr_prec(Token** token_list, int precedence) {
             break;
         }
     }
-    print_node(lhs, 0);
+    //print_node(lhs, 0);
     return lhs;
 }
 
@@ -687,11 +744,42 @@ Node* ast_create_expression(Token** token_list) {
 }
 
 void ast_add_node(Node** ast, Node* add) {
-    (*ast)->next = add;
-    *ast = (*ast)->next;
+    Node* beg = *ast;
+    while (beg->next != NULL) {
+        beg = beg->next;
+    }
+    beg->next = add;
 }
 
-Error ast_create(Token** token_list, Node** ast, bool is_block) {
+Node* ast_create_block(Scope* parent_scope) {
+    Node* ret = calloc(1, sizeof(Node));
+    BlockNode* _node = calloc(1, sizeof(BlockNode));
+    Scope* scope = calloc(1, sizeof(Scope));
+    Node* statements_root = calloc(1, sizeof(Node));
+    statements_root->nt = NODE_ROOT;
+    
+    _node->scope = scope;
+    _node->statements = statements_root;
+    scope->parent_scope = parent_scope;
+    ret->block = _node;
+    ret->nt = NODE_BLOCK;
+    return ret;
+}
+
+Node* ast_create_function(Token* name, Node* args, Token* return_types, Node* block) {
+    // TODO: args and return_types
+    Node* ret = calloc(1, sizeof(Node));
+    FunctionNode* _node = calloc(1, sizeof(FunctionNode));
+    _node->name = name;
+    _node->args = args;
+    _node->block = block;
+    
+    ret->nt = NODE_FUNC;
+    ret->func = _node;
+    return ret;
+}
+
+Error ast_create(Token** token_list, Node** ast, Scope** scope, bool is_block) {
     Token* current_token = *token_list;
     while(current_token != NULL) {
         if (current_token->tt == TK_NEWLINE) {
@@ -701,7 +789,8 @@ Error ast_create(Token** token_list, Node** ast, bool is_block) {
             // Expect Function definition
             current_token = current_token->next;
             expect(current_token, TK_PAREN_OPEN);
-            // TODO: HANDLE ARGUMENTS 
+            // TODO: HANDLE ARGUMENTS
+            Node* args = NULL;
             current_token = current_token->next;
             expect(current_token, TK_PAREN_CLOSE);
 
@@ -718,23 +807,33 @@ Error ast_create(Token** token_list, Node** ast, bool is_block) {
             expect(current_token, TK_CURLY_OPEN);
             current_token = current_token->next;
             //TODO: BLOCK START
+            Node* block = ast_create_block(*scope);
             *token_list = current_token;
-            ast_create(token_list, ast, true);
+            ast_create(token_list,
+                       &(block->block->statements),
+                       &(block->block->scope),
+                      true);
             // TODO: Constants
             current_token = *token_list;
             expect(current_token, TK_CURLY_CLOSE);
+            Node* func = ast_create_function(name, args, func_ret, block);
+            ast_add_node(ast, func);
         }
 
         if (is_block) {
-            if(current_token->tt == TK_IDENTIFIER) {
+            Token* tmp = current_token; // saving the type or DOUBLE_C
+            if(current_token->tt == TK_IDENTIFIER || tmp->tt == TK_DOUBLE_C) {
                 // type var decl
-                Token* tmp = current_token;
                 current_token = current_token->next;
                 //expect(current_token, TK_DOUBLE_C);
-                if (current_token->tt == TK_DOUBLE_C) {
-                    VarType type = get_var_type(current_token);
-                    // Var decl
-                    current_token = current_token->next;
+                if (current_token->tt == TK_DOUBLE_C || tmp->tt == TK_DOUBLE_C) {
+                    VarType type;
+                    if (tmp->tt == TK_DOUBLE_C) {
+                        type = TYPE_UNKNOWN;
+                    } else {
+                        type = get_var_type(current_token);
+                        current_token = current_token->next;
+                    }
                     expect(current_token, TK_IDENTIFIER);
                     Token* identifier = current_token;
                     Node* var = ast_create_variable(type, identifier);
@@ -750,6 +849,7 @@ Error ast_create(Token** token_list, Node** ast, bool is_block) {
                     current_token = *token_list;
                     expect(current_token, TK_NEWLINE);
                     Node* var_decl = ast_create_var_decl_node(var, expr, type);
+                    ast_add_node(ast, var_decl);
                     // Create VarDeclNode
                 } else if (current_token->tt == TK_ASSIGN) {
                     // var reassignment
@@ -784,5 +884,9 @@ int main(int argc, char** argv) {
     Node* ast_root = calloc(1, sizeof(Node));
     ast_root->nt = NODE_ROOT;
     print_tokens(token_list);
-    ast_create(&token_list, &ast_root, false);
+    Scope* root_scope = calloc(1, sizeof(Scope));
+    ast_create(&token_list, &ast_root, &root_scope, false);
+    printf("[DEBUG]: Printing Nodes...\n");
+    print_node(ast_root->next, 0);
+    return 0;
 }
