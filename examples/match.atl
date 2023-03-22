@@ -1,0 +1,40 @@
+
+enum test_enum {
+    test = 1
+    test1
+}
+
+test (int x) {
+    match x {
+        test_enum.test  => printf("test")
+        test_enum.test1 => printf("test1")
+    } // in this case, only the first one will print
+
+    // or
+    match x {
+        test_enum.test
+        test_enum.test1 => printf("test and test1")
+    } // this case it will print both
+
+    // the above can be re-written in a single line:
+    match x {
+        test_enum.test; test_enum.test1 => printf("test and test1")
+    }
+
+    match x {
+        test_enum.test
+        test_enum.test1 => {
+            printf("test") // also works in blocks
+            printf(" and test1")
+        }
+    }
+
+    :: ret = match x {
+        test_enum.test  => true
+        test_enum.test1 => false
+    } // ret will be true
+}
+    
+main () {
+    test(1)   
+}
