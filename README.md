@@ -16,6 +16,12 @@ The Compiler has just started development so it doesn't do anything as of yet:
   - [ ] Call Nodes
 - [ ] Type Checking
 - [ ] Codegen (either LLVM or NASM)
+  - [ ] Constants
+  - [ ] Variable Declaration
+  - [ ] Assignments
+  - [ ] Return
+  
+- **Note:** if the option is ticked, it means that it is working but doesn't necessarily mean it is complete from a functionality POV 
 
 ## Planned Design
 Below are some sample programs that have been written to encapsulate what kind of syntax Atlas will have
@@ -59,5 +65,16 @@ main () {
     test.x = 1
     test.y = 2
     test.z = 3
+}
+```
+
+## What works now?
+This incredibly useless and simple program demonstrates what is working at the moment.
+```C
+// simple.atl
+main () {
+    i32 :: test = 1 * 2 + 4 * 3
+    i64 :: test2 = 4
+    -> 5
 }
 ```
