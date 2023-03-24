@@ -15,7 +15,7 @@ The Compiler has just started development so it doesn't do anything as of yet:
   - [ ] Assignment Nodes
   - [ ] Call Nodes
 - [ ] Type Checking
-- [ ] Codegen (either LLVM or NASM)
+- [ ] Codegen (LLVM)
   - [ ] Constants
   - [ ] Variable Declaration
   - [ ] Assignments
