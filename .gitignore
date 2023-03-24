@@ -1,3 +1,5 @@
 .ccls-cache/*
 *.o
 main
+*.ll
+module
