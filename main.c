@@ -84,7 +84,7 @@ typedef enum NodeType {
     NODE_BINOP,
     NODE_CONSTANT,
     NODE_VAR,
-    NODE_RETURN
+    NODE_RETURN,
 } NodeType;
 
 
@@ -155,6 +155,11 @@ typedef struct FunctionNode {
     struct Node* block;
 } FunctionNode;
 
+typedef struct CallNode {
+    Token* name;
+    struct Node* arguments;
+} CallNode;
+
 typedef struct Node {
     struct Node* next;
     NodeType nt;
@@ -167,8 +172,11 @@ typedef struct Node {
         VariableNode* var;
         ConstantNode* constant;
         ReturnNode* ret;
+        CallNode* call;
     };
 } Node;
+
+Node* ast_create_expression(Token** token_list, bool is_args);
 
 static Error OK = (Error) {COMPILER, NULL};
 
@@ -340,13 +348,17 @@ void print_node(Node* node, int tab_level) {
     case NODE_VAR: {
         printf("%sVariableNode%s <\"", CL_CYAN, CL_RESET);
         print_token_str(node->var->identifier);
-        printf("\">");
-        printf("\n");
+        printf("\">\n");
         break;
     }
     case NODE_RETURN:
         printf("%sReturnNode%s\n", CL_CYAN, CL_RESET);
         print_node(node->ret->ret_expr, tab_level + 1);
+        break;
+    case NODE_CALL:
+        printf("%sCallNode%s <\"", CL_CYAN, CL_RESET);
+        print_token_str(node->call->name);
+        printf("\">\n");
         break;
     default:
         print_error_msg("Something has horribly gone wrong");
@@ -354,6 +366,13 @@ void print_node(Node* node, int tab_level) {
         break;
     }
     //printf("\n");
+}
+
+void print_nodes(Node* node) {
+    while(node != NULL) {
+        print_node(node, 0);
+        node = node->next;
+    }
 }
 
 void fatal(const char* string) {
@@ -592,7 +611,7 @@ char* read_src(const char* filename, int* count) {
     FILE* fp = fopen(filename, "r");
 
     if (fp == NULL) {
-        fatal("Could not open the file");
+        fatal("Could not open the file\n");
     }
 
     *count = 0;
@@ -699,12 +718,12 @@ LLVMTypeRef codegen_get_var_type(VarType var_type) {
         return LLVMInt8Type();
     case TYPE_UNKNOWN:
         printf("UNKNOWN");
+        return NULL;
         break;
-    case TYPE_INVALID:
-        printf("UNKNOWN");
-        break;
+    default:
+        fatal("(CODEGEN) INVALID TYPE/TYPE NOT IMPLEMENTED YET");
+        return NULL; // not reachable - just want the compiler to shutup
     }
-
 }
 
 LLVMValueRef codegen_constant(ConstantNode* constant) {
@@ -714,7 +733,6 @@ LLVMValueRef codegen_constant(ConstantNode* constant) {
 }
 
 LLVMValueRef codegen_binop(BinOpNode* binop, LLVMBuilderRef builder) {
-
     LLVMValueRef lhs;
     switch(binop->lhs->nt) {
     case NODE_BINOP:
@@ -754,6 +772,11 @@ LLVMValueRef codegen_binop(BinOpNode* binop, LLVMBuilderRef builder) {
         return LLVMBuildMul(builder, lhs, rhs, "");
     if (op == '/')
         fatal("DIVIDE NOT SUPPORTED\n");
+    else
+        printf("%s[FATAL]:%s OPERATOR '%c' NOT SUPPORTED\n",
+               CL_RED, CL_RESET,
+               op);
+    exit(1);
 }
 
 LLVMValueRef codegen_expression(Node* expr, LLVMBuilderRef builder) {
@@ -772,6 +795,8 @@ LLVMValueRef codegen_expression(Node* expr, LLVMBuilderRef builder) {
     case NODE_VAR:
         //TODO:
         fatal("(CODEGEN) VAR NOT IMPLEMENTED YET\n");
+    default:
+        fatal("(CODEGEN) THIS VAR TYPE IS NOT SUPPORTED IN AN EXPR");
     }
     return ret;
 }
@@ -794,6 +819,7 @@ Error codegen_vardecl(VarDeclNode* var_decl, LLVMBuilderRef builder) {
 Error codegen_return(ReturnNode* ret, LLVMBuilderRef builder) {
     LLVMValueRef ret_expr = codegen_expression(ret->ret_expr, builder);
     LLVMBuildRet(builder, ret_expr);
+    return OK;
 }
 
 Error codegen_block(BlockNode* block, LLVMBuilderRef builder) {
@@ -815,6 +841,8 @@ Error codegen_block(BlockNode* block, LLVMBuilderRef builder) {
             break;
         case NODE_RETURN:
             codegen_return(current_statement->ret, builder);
+        default:
+            break;
         }
         current_statement = current_statement->next;
     }
@@ -857,6 +885,7 @@ Error codegen_start(Node* ast) {
     char* errors;
     LLVMTargetRef target;
     LLVMPrintModuleToFile(mod, "module.ll", &errors);
+    return OK;
 }
 
 Error codegen_start_help(Node* ast) {
@@ -965,48 +994,99 @@ Node* ast_create_binop(Node* lhs, Node* rhs, Token* op) {
     return ret;
 }
 
-Node* ast_create_expr_prec(Token** token_list, int precedence) {
-    Node* lhs = ast_create_constant(*token_list);
+Node* ast_create_call(Token** token_list) {
+    Node* ret = calloc(1, sizeof(Node));
+    CallNode* _node = calloc(1, sizeof(CallNode));
+    _node->name = *token_list;
+    *token_list = (*token_list)->next;
+    ret->nt = NODE_CALL;
+    Node* args = NULL;
+    *token_list = (*token_list)->next; // Skip the open paren
+    while ((*token_list)->tt != TK_PAREN_CLOSE) {
+        if ((*token_list)->tt == TK_NEWLINE) {
+           fatal("(AST_GEN) MISSING CLOSING PAREN\n");
+        }
+        ast_create_expression(token_list, true);
+        *token_list = (*token_list)->next;
+    }
+    print_token(*token_list);
+    *token_list = (*token_list)->next;// skip paren close
+    print_token(*token_list);
+    ret->call = _node;
+    return ret;
+}
+
+
+Node* ast_create_expr_prec(Token** token_list, int precedence, bool is_args) {
+    Node* lhs;
+    if ((*token_list)->tt == TK_IDENTIFIER
+        && (*token_list)->next->tt == TK_PAREN_OPEN) {
+        // Function Call
+        //*token_list = (*token_list)->next; // skip the paren
+        lhs = ast_create_call(token_list);
+    } else if ((*token_list)->tt == TK_IDENTIFIER) {
+        // Variable
+        fatal("(AST GEN) Variables in expr not implemented yet\n");
+    } else {
+        // Constant TODO: handle quotes 
+        lhs = ast_create_constant(*token_list);
+    }
     Token* lookahead = (*token_list)->next; // operator is a lookahead
     Node* rhs = NULL;
+    /*
     if ((*token_list)->tt == TK_NEWLINE) {
         print_error_msg("Expected an Expression but got a NEWLINE");
         exit(1);
     }
-    while(get_prec(lookahead->tt) >= precedence) {
-        *token_list = (*token_list)->next; // op
-        Token* op = *token_list; // operator is a lookahead
-        *token_list = (*token_list)->next; // rhs
-        if ((*token_list)->tt == TK_CONSTANT) {
-            rhs = ast_create_constant(*token_list);
-        }
-        lookahead = (*token_list)->next;
-        // TODO: handle left associativity
-        //printf("LOOKAHEAD\n");
-        //print_token(lookahead);
-        //print_token(op);
-        while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
-            if (get_prec(lookahead->tt) > get_prec(op->tt))
-                rhs = ast_create_expr_prec(token_list, get_prec(op->tt) + 1);
-            else
-                rhs = ast_create_expr_prec(token_list, get_prec(op->tt));
-            *token_list = (*token_list)->next;
-            if ((*token_list)->tt == TK_NEWLINE) {
-                break;
+    */
+    if ((*token_list)->tt != TK_NEWLINE) {
+        while(get_prec(lookahead->tt) >= precedence) {
+            *token_list = (*token_list)->next; // op
+            Token* op = *token_list; // operator is a lookahead
+            *token_list = (*token_list)->next; // rhs
+            if ((*token_list)->tt == TK_CONSTANT) {
+                rhs = ast_create_constant(*token_list);
             }
             lookahead = (*token_list)->next;
-        }
-        lhs = ast_create_binop(lhs, rhs, op);
-        if ((*token_list)->tt == TK_NEWLINE || (*token_list)->next->tt == TK_NEWLINE) {
-            break;
+            // TODO: handle left associativity
+            printf("LOOKAHEAD\n");
+            print_token(lookahead);
+            print_token(op);
+            while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
+                if (get_prec(lookahead->tt) > get_prec(op->tt))
+                    rhs = ast_create_expr_prec(token_list, get_prec(op->tt) + 1, false);
+                else
+                    rhs = ast_create_expr_prec(token_list, get_prec(op->tt), false);
+                *token_list = (*token_list)->next;
+                if ((*token_list)->tt == TK_NEWLINE || (*token_list)->tt == TK_COMMA) {
+                    break;
+                }
+                lookahead = (*token_list)->next;
+            }
+            lhs = ast_create_binop(lhs, rhs, op);
+            if ((*token_list)->tt == TK_NEWLINE ||
+                (*token_list)->next->tt == TK_NEWLINE ||
+                (*token_list)->tt == TK_COMMA) {
+                break;
+            }
         }
     }
     //print_node(lhs, 0);
     return lhs;
 }
 
-Node* ast_create_expression(Token** token_list) {
-    return ast_create_expr_prec(token_list, 0);
+void ast_scope_add(Scope** scope, Node* node) {
+    // adds function or var to scope
+    Node* beg = (*scope)->names;
+    if (beg == NULL) {
+        memcpy((*scope)->names, node, sizeof(Node));
+    } else {
+        while (beg->next != NULL) {
+            beg = beg->next;
+        }
+        beg->next = node;
+        memcpy(beg->next, node, sizeof(Node));
+    }
 }
 
 void ast_add_node(Node** ast, Node* add) {
@@ -1021,7 +1101,7 @@ Node* ast_create_return(Token** expr) {
     Node* ret = calloc(1, sizeof(Node));
     ret->nt = NODE_RETURN;
     ReturnNode* return_node = calloc(1, sizeof(Node));
-    Node* ret_expr = ast_create_expression(expr);
+    Node* ret_expr = ast_create_expression(expr, false);
     return_node->ret_expr = ret_expr;
     ret->ret = return_node;
 
@@ -1054,6 +1134,10 @@ Node* ast_create_function(Token* name, Node* args, Token* return_types, Node* bl
     ret->nt = NODE_FUNC;
     ret->func = _node;
     return ret;
+}
+
+Node* ast_create_expression(Token** token_list, bool is_args) {
+    return ast_create_expr_prec(token_list, 0, is_args);
 }
 
 Error ast_create(Token** token_list, Node** ast, Scope** scope, bool is_block) {
@@ -1095,6 +1179,7 @@ Error ast_create(Token** token_list, Node** ast, Scope** scope, bool is_block) {
             expect(current_token, TK_CURLY_CLOSE);
             Node* func = ast_create_function(name, args, func_ret, block);
             ast_add_node(ast, func);
+            //ast_scope_add(scope, func);
         }
 
         if (is_block) {
@@ -1119,7 +1204,7 @@ Error ast_create(Token** token_list, Node** ast, Scope** scope, bool is_block) {
                     // TODO: EXPRESSION NODE
                     current_token = current_token->next;
                     *token_list = current_token;
-                    Node* expr = ast_create_expression(token_list);
+                    Node* expr = ast_create_expression(token_list, false);
                     if ((*token_list)->next->tt == TK_NEWLINE) {
                         *token_list = (*token_list)->next;
                     }
@@ -1131,7 +1216,15 @@ Error ast_create(Token** token_list, Node** ast, Scope** scope, bool is_block) {
                 } else if (current_token->tt == TK_ASSIGN) {
                     // var reassignment
                     Token* name = tmp;
-                } 
+                } else if (current_token->tt == TK_PAREN_OPEN){ 
+                    // Function Call, line is an expression
+                    Token* name = tmp;
+                    Node* expr = ast_create_expression(token_list, false);
+                    if ((*token_list)->next->tt == TK_NEWLINE) {
+                        *token_list = (*token_list)->next;
+                    }
+                    current_token = *token_list;
+                }
             } else if (current_token->tt == TK_ARROW) {
                 current_token = current_token->next;
                 *token_list = current_token;
@@ -1169,7 +1262,7 @@ int main(int argc, char** argv) {
     Scope* root_scope = calloc(1, sizeof(Scope));
     ast_create(&token_list, &ast_root, &root_scope, false);
     printf("[DEBUG]: Printing Nodes...\n");
-    print_node(ast_root->next, 0);
+    print_nodes(ast_root->next);
     //codegen_start_help(ast_root);
     printf("[DEBUG]: STARTING CODEGEN...\n");
     codegen_start(ast_root);
