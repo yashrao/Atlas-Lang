@@ -192,7 +192,7 @@ Node* ast_create_expression(Token** token_list, bool is_args);
 static Error OK = (Error) {COMPILER, NULL};
 
 void print_usage() {
-    printf("OI, this is the usage\n");
+    printf("Atlas: %s[ERROR]:%s no input files\n", CL_RED, CL_RESET);
 }
 
 const char* get_tt(TokenType tt) {
@@ -737,22 +737,76 @@ LLVMTypeRef codegen_get_var_type(VarType var_type, LLVMContextRef ctx) {
     }
 }
 
+Node* codegen_find_name_in_scope(Scope* scope, const char* name) {
+    Node* beg = scope->names;
+    while (beg != NULL) {
+        // TODO: only handles functions for now, need to do variables later
+        switch(beg->nt) {
+        case NODE_FUNC: {
+            FunctionNode* func = beg->func;
+            int n = calc_str_len(func->name);
+            char func_name[n];
+            fill_char_array(func_name, func->name, n);
+            if (strcmp(func_name, name) == 0) {
+                return beg;
+            }
+            break;
+        }
+        case NODE_VAR: {
+            VariableNode* var = beg->var;
+            int n = calc_str_len(var->identifier);
+            char var_name[n];
+            fill_char_array(var_name, var->identifier, n);
+            if (strcmp(var_name, name) == 0) {
+                return beg;
+            }
+            break;
+        }
+        default:
+            fatal("Invalid Node in codegen_find_name_in_scope\n");
+        }
+        beg = beg->next;
+    }
+    return NULL;
+}
+
+LLVMValueRef codegen_var(VariableNode* var, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod) {
+    //LLVMBuildLoad2(LLVMBuilderRef, LLVMTypeRef Ty, LLVMValueRef PointerVal, const char *Name)
+    LLVMContextRef ctx = LLVMGetModuleContext(mod);
+    int n = calc_str_len(var->identifier);
+    char name[n];
+    fill_char_array(name, var->identifier, n);
+    Node* node = codegen_find_name_in_scope(scope, name);
+    if (node == 0) {
+        printf("Unable to find \"%s\"\n", name);
+        fatal("Unable to find above variable\n");
+    }
+    printf("TESTING: %s\n", name);
+
+    return LLVMBuildLoad2(builder, node->var->llvm_var_type, node->var->llvm_value_ref, "");
+}
+
 LLVMValueRef codegen_constant(ConstantNode* constant, LLVMContextRef ctx) {
     // TODO: un-hardcode everything
     printf("CONSTANT: %d\n", constant->iVal);
     return LLVMConstInt(LLVMInt64TypeInContext(ctx), constant->iVal, false);
 }
 
-LLVMValueRef codegen_binop(BinOpNode* binop, LLVMBuilderRef builder, LLVMModuleRef mod, LLVMContextRef ctx) {
+LLVMValueRef codegen_binop(BinOpNode* binop, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod) {
+    LLVMContextRef ctx = LLVMGetModuleContext(mod);
     LLVMValueRef lhs;
     switch(binop->lhs->nt) {
     case NODE_BINOP:
-        lhs = codegen_binop(binop->lhs->binop, builder, mod, ctx);
+        lhs = codegen_binop(binop->lhs->binop, scope, builder, mod);
         break;
     case NODE_CONSTANT:
         lhs = codegen_constant(binop->lhs->constant, ctx);
         break;
         //TODO: other cases
+    case NODE_VAR:
+        lhs = codegen_var(binop->lhs->var, scope, builder, mod);
+            //ret = codegen_var(expr->var, scope, builder, mod);
+        break;
     default:
         printf("(CODEGEN) LHS: '%d' NODE TYPE NOT IMPLEMENTED IN EXPRESSION\n",
               binop->lhs->nt);
@@ -762,12 +816,16 @@ LLVMValueRef codegen_binop(BinOpNode* binop, LLVMBuilderRef builder, LLVMModuleR
     LLVMValueRef rhs;
     switch(binop->rhs->nt) {
     case NODE_BINOP:
-        rhs = codegen_binop(binop->rhs->binop, builder, mod, ctx);
+        rhs = codegen_binop(binop->rhs->binop, scope, builder, mod);
         break;
     case NODE_CONSTANT:
         rhs = codegen_constant(binop->rhs->constant, ctx);
         break;
         //TODO: other cases
+    case NODE_VAR:
+        rhs = codegen_var(binop->lhs->var, scope, builder, mod);
+            //ret = codegen_var(expr->var, scope, builder, mod);
+        break;
     default:
         printf("(CODEGEN) RHS: '%d' NODE TYPE NOT IMPLEMENTED IN EXPRESSION\n",
               binop->rhs->nt);
@@ -790,28 +848,6 @@ LLVMValueRef codegen_binop(BinOpNode* binop, LLVMBuilderRef builder, LLVMModuleR
                CL_RED, CL_RESET,
                op);
     exit(1);
-}
-
-Node* codegen_find_name_in_scope(Scope* scope, const char* name) {
-    Node* beg = scope->names;
-    while (beg != NULL) {
-        // TODO: only handles functions for now, need to do variables later
-        switch(beg->nt) {
-        case NODE_FUNC: {
-            FunctionNode* func = beg->func;
-            int n = calc_str_len(func->name);
-            char func_name[n];
-            fill_char_array(func_name, func->name, n);
-            if (strcmp(func_name, name) == 0) {
-                return beg;
-            }
-        }
-        default:
-            fatal("Invalid Node in codegen_find_name_in_scope\n");
-        }
-        beg = beg->next;
-    }
-    return NULL;
 }
 
 LLVMValueRef codegen_call(CallNode* call, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod) {
@@ -841,15 +877,19 @@ LLVMValueRef codegen_expression(Node* expr, Scope* scope, LLVMBuilderRef builder
         break;
     case NODE_BINOP:
         //TODO:
-        ret = codegen_binop(expr->binop, builder, mod, ctx);
+        ret = codegen_binop(expr->binop, scope, builder, mod);
         break;
     case NODE_CONSTANT:
         //TODO:
-        ret = LLVMConstInt(LLVMInt64TypeInContext(ctx), expr->constant->iVal, false);
+        //ret = LLVMConstInt(LLVMInt64TypeInContext(ctx), expr->constant->iVal, false);
+        ret = codegen_constant(expr->constant, ctx);
         break;
     case NODE_VAR:
         //TODO:
-        fatal("(CODEGEN) VAR NOT IMPLEMENTED YET\n");
+        //ret = codegen_var(VariableNode *var, Scope *scope, LLVMBuilderRef builder, LLVMModuleRef mod)
+        ret = codegen_var(expr->var, scope, builder, mod);
+        break;
+        //fatal("(CODEGEN) VAR NOT IMPLEMENTED YET\n");
     default:
         fatal("(CODEGEN) THIS VAR TYPE IS NOT SUPPORTED IN AN EXPR");
     }
@@ -858,6 +898,7 @@ LLVMValueRef codegen_expression(Node* expr, Scope* scope, LLVMBuilderRef builder
 
 Error codegen_vardecl(VarDeclNode* var_decl, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod, LLVMContextRef ctx) {
     //lhs
+    VariableNode* scoped_var = var_decl->lhs->var->scoped_var->var;
     printf("[DEBUG]: \t\tCODEGEN VARDECL\n");
     LLVMTypeRef type = codegen_get_var_type(var_decl->type, ctx);
     int n = calc_str_len(var_decl->lhs->var->identifier);
@@ -868,6 +909,10 @@ Error codegen_vardecl(VarDeclNode* var_decl, Scope* scope, LLVMBuilderRef builde
     LLVMValueRef rhs = codegen_expression(var_decl->rhs, scope, builder, mod, ctx);
     //LLVMBuildStore(LLVMBuilderRef, LLVMValueRef Val, LLVMValueRef Ptr)
     LLVMBuildStore(builder, rhs, lhs);
+
+    scoped_var->llvm_value_ref = lhs;
+    scoped_var->llvm_var_type = type;
+    
     return OK;
 }
 
@@ -971,12 +1016,10 @@ Error codegen_function(FunctionNode* func_node, FunctionNode* func_scoped, LLVMM
     LLVMContextRef ctx = LLVMGetModuleContext(mod);
     printf("[DEBUG]: CODEGEN FUNCTION\n");
     printf("[DEBUG]: ");
-    //LLVMTypeRef param_types[] = { LLVMInt32Type(), LLVMInt32Type() };
     LLVMTypeRef param_types[] = { LLVMVoidType() };
     int argc = 0;
     LLVMTypeRef ret = codegen_get_type(func_node->return_types, ctx);
     //LLVMTypeRef param_types[] = {};
-    //LLVMTypeRef fn_type = LLVMFunctionType(LLVMInt32Type(), param_types, argc, 0);
     LLVMTypeRef fn_type = LLVMFunctionType(ret, param_types, argc, 0);
     int n = calc_str_len(func_node->name);
     char name[n];
@@ -1112,7 +1155,8 @@ Node* ast_create_expr_prec(Token** token_list, int precedence, bool is_args) {
         lhs = ast_create_call(token_list);
     } else if ((*token_list)->tt == TK_IDENTIFIER) {
         // Variable
-        fatal("(AST GEN) Variables in expr not implemented yet\n");
+        lhs = ast_create_variable(TYPE_UNKNOWN, *token_list);
+        //fatal("(AST GEN) Variables in expr not implemented yet\n");
     } else {
         // Constant TODO: handle quotes 
         lhs = ast_create_constant(*token_list);
