@@ -7,19 +7,19 @@ The Compiler has just started development so it doesn't do anything as of yet:
 - [ ] AST Generation
   - [ ] Function Nodes
     - [ ] Arguments
-    - [ ] Return Types
+    - [X] Return Types
     - [X] Block
   - [X] Block Nodes
   - [X] Variable Nodes
   - [X] Variable Declaration Nodes
-  - [ ] Assignment Nodes
-  - [ ] Call Nodes
+  - [X] Assignment Nodes
+  - [X] Call Nodes
 - [ ] Type Checking
 - [ ] Codegen (LLVM)
-  - [ ] Constants
-  - [ ] Variable Declaration
+  - [X] Constants
+  - [X] Variable Declaration
   - [ ] Assignments
-  - [ ] Return
+  - [X] Return
   
 - **Note:** if the option is ticked, it means that it is working but doesn't necessarily mean it is complete from a functionality POV 
 
