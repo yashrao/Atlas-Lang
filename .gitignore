@@ -1,5 +1,6 @@
 .ccls-cache/*
 *.o
-main
+atlas
 *.ll
-module
+module*
+note.c
