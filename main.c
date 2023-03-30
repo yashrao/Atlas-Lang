@@ -791,6 +791,25 @@ LLVMValueRef codegen_constant(ConstantNode* constant, LLVMContextRef ctx) {
     printf("CONSTANT: %d\n", constant->iVal);
     return LLVMConstInt(LLVMInt64TypeInContext(ctx), constant->iVal, false);
 }
+LLVMValueRef codegen_call(CallNode* call, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod) {
+    LLVMContextRef ctx = LLVMGetModuleContext(mod);
+    int n = calc_str_len(call->name);
+    char name[n];
+    fill_char_array(name, call->name, n);
+    Node* scoped_node = codegen_find_name_in_scope(scope->parent_scope, name);
+    if (scoped_node == 0) {
+        printf("Unable to find \"%s\"\n", name);
+        fatal("Unable to find above function\n");
+    }
+    FunctionNode* fn = scoped_node->func;
+    printf("TESTING: %s\n", name);
+    LLVMValueRef* args  = calloc(1, sizeof(LLVMValueRef));
+
+    LLVMTypeRef param_types[] = { LLVMVoidType() };
+    LLVMTypeRef fn_type = LLVMFunctionType(LLVMVoidTypeInContext(ctx), param_types, 0, 0);
+    return LLVMBuildCall2(builder, fn->llvm_fn_type, fn->llvm_value_ref, NULL, 0, "");
+}
+
 
 LLVMValueRef codegen_binop(BinOpNode* binop, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod) {
     LLVMContextRef ctx = LLVMGetModuleContext(mod);
@@ -805,7 +824,9 @@ LLVMValueRef codegen_binop(BinOpNode* binop, Scope* scope, LLVMBuilderRef builde
         //TODO: other cases
     case NODE_VAR:
         lhs = codegen_var(binop->lhs->var, scope, builder, mod);
-            //ret = codegen_var(expr->var, scope, builder, mod);
+        break;
+    case NODE_CALL:
+        lhs = codegen_call(binop->lhs->call, scope, builder, mod);
         break;
     default:
         printf("(CODEGEN) LHS: '%d' NODE TYPE NOT IMPLEMENTED IN EXPRESSION\n",
@@ -823,8 +844,10 @@ LLVMValueRef codegen_binop(BinOpNode* binop, Scope* scope, LLVMBuilderRef builde
         break;
         //TODO: other cases
     case NODE_VAR:
-        rhs = codegen_var(binop->lhs->var, scope, builder, mod);
-            //ret = codegen_var(expr->var, scope, builder, mod);
+        rhs = codegen_var(binop->rhs->var, scope, builder, mod);
+        break;
+    case NODE_CALL:
+        rhs = codegen_call(binop->rhs->call, scope, builder, mod);
         break;
     default:
         printf("(CODEGEN) RHS: '%d' NODE TYPE NOT IMPLEMENTED IN EXPRESSION\n",
@@ -848,25 +871,6 @@ LLVMValueRef codegen_binop(BinOpNode* binop, Scope* scope, LLVMBuilderRef builde
                CL_RED, CL_RESET,
                op);
     exit(1);
-}
-
-LLVMValueRef codegen_call(CallNode* call, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod) {
-    LLVMContextRef ctx = LLVMGetModuleContext(mod);
-    int n = calc_str_len(call->name);
-    char name[n];
-    fill_char_array(name, call->name, n);
-    Node* scoped_node = codegen_find_name_in_scope(scope->parent_scope, name);
-    if (scoped_node == 0) {
-        printf("Unable to find \"%s\"\n", name);
-        fatal("Unable to find above function\n");
-    }
-    FunctionNode* fn = scoped_node->func;
-    printf("TESTING: %s\n", name);
-    LLVMValueRef* args  = calloc(1, sizeof(LLVMValueRef));
-
-    LLVMTypeRef param_types[] = { LLVMVoidType() };
-    LLVMTypeRef fn_type = LLVMFunctionType(LLVMVoidTypeInContext(ctx), param_types, 0, 0);
-    return LLVMBuildCall2(builder, fn->llvm_fn_type, fn->llvm_value_ref, NULL, 0, "");
 }
 
 LLVMValueRef codegen_expression(Node* expr, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod, LLVMContextRef ctx) {
@@ -1089,6 +1093,8 @@ Node* ast_create_var_decl_node(Node* lhs, Node* rhs, VarType type) {
 
 int get_prec(TokenType tt) {
     switch(tt) {
+    case TK_PAREN_OPEN:
+        return 3;
     case TK_STAR:
     case TK_SLASH:
         return 2;
@@ -1138,9 +1144,7 @@ Node* ast_create_call(Token** token_list) {
         ast_create_expression(token_list, true);
         *token_list = (*token_list)->next;
     }
-    print_token(*token_list);
-    *token_list = (*token_list)->next;// skip paren close
-    print_token(*token_list);
+    // *token_list should be on paren_close now
     ret->call = _node;
     return ret;
 }
@@ -1154,7 +1158,7 @@ Node* ast_create_expr_prec(Token** token_list, int precedence, bool is_args) {
         //*token_list = (*token_list)->next; // skip the paren
         lhs = ast_create_call(token_list);
     } else if ((*token_list)->tt == TK_IDENTIFIER) {
-        // Variable
+        //Variable
         lhs = ast_create_variable(TYPE_UNKNOWN, *token_list);
         //fatal("(AST GEN) Variables in expr not implemented yet\n");
     } else {
@@ -1174,7 +1178,22 @@ Node* ast_create_expr_prec(Token** token_list, int precedence, bool is_args) {
             *token_list = (*token_list)->next; // op
             Token* op = *token_list; // operator is a lookahead
             *token_list = (*token_list)->next; // rhs
+            /*
             if ((*token_list)->tt == TK_CONSTANT) {
+                rhs = ast_create_constant(*token_list);
+            }
+            */
+            if ((*token_list)->tt == TK_IDENTIFIER
+                && (*token_list)->next->tt == TK_PAREN_OPEN) {
+                // Function Call
+                //*token_list = (*token_list)->next; // skip the paren
+                rhs = ast_create_call(token_list);
+            } else if ((*token_list)->tt == TK_IDENTIFIER) {
+                // Variable
+                rhs = ast_create_variable(TYPE_UNKNOWN, *token_list);
+                //fatal("(AST GEN) Variables in expr not implemented yet\n");
+            } else {
+                // Constant TODO: handle quotes 
                 rhs = ast_create_constant(*token_list);
             }
             lookahead = (*token_list)->next;
