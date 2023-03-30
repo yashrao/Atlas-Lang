@@ -74,6 +74,7 @@ typedef enum VarType {
 
 typedef enum NodeType {
     NODE_FUNC = 200,
+    NODE_PARAM,
     NODE_BLOCK,
     NODE_ROOT,
 
@@ -114,6 +115,7 @@ typedef struct ConstantNode {
 
 typedef struct VariableNode {
     VarType type;
+    Token* type_;
     Token* identifier;
 
     // Codegen
@@ -156,11 +158,11 @@ typedef struct BlockNode {
 
 typedef struct FunctionNode {
     Token* name;
-    struct Node* args; // VariableNodes
+    int param_count;
+    struct Node* params; // VariableNodes
     struct Node* block;
     Token* return_types;
     // for Codegen
-    //TODO: params
     struct Node* scoped_node;
     LLVMValueRef llvm_value_ref;
     LLVMTypeRef llvm_fn_type;
@@ -171,11 +173,20 @@ typedef struct CallNode {
     struct Node* arguments;
 } CallNode;
 
+// TODO:
+typedef struct ParamNode {
+    Token* type;
+    Token* param;
+
+    //TODO: codegen
+} ParamNode;
+
 typedef struct Node {
     struct Node* next;
     NodeType nt;
     union {
         FunctionNode* func;
+        ParamNode* param;
         BlockNode* block;
         AssignNode* assign;
         BinOpNode* binop;
@@ -737,6 +748,62 @@ LLVMTypeRef codegen_get_var_type(VarType var_type, LLVMContextRef ctx) {
     }
 }
 
+LLVMTypeRef codegen_get_type(Token* id, LLVMContextRef ctx) {
+    if (id == NULL) {
+        return LLVMVoidTypeInContext(ctx);
+    }
+    char* beg = id->beg;
+    char* end = id->end;
+    int n = 1;
+    while (beg != end) {
+        beg++;
+        n++;
+    }
+    if (strncmp(id->beg, "i8", n) == 0 && n == 2) {
+        return LLVMInt8TypeInContext(ctx);
+    } else if (strncmp(id->beg, "i16", n) == 0 && n == 3) {
+        return LLVMInt16TypeInContext(ctx);
+    } else if (strncmp(id->beg, "i32", n) == 0 && n == 3) {
+        return LLVMInt32TypeInContext(ctx);
+    } else if (strncmp(id->beg, "i64", n) == 0 && n == 3) {
+        return LLVMInt64TypeInContext(ctx);
+    } else if (strncmp(id->beg, "u8", n) == 0 && n == 2) {
+        return LLVMInt8TypeInContext(ctx);
+    } else if (strncmp(id->beg, "u16", n) == 0 && n == 3) {
+        return LLVMInt16TypeInContext(ctx);
+    } else if (strncmp(id->beg, "u32", n) == 0 && n == 3) {
+        return LLVMInt32TypeInContext(ctx);
+    } else if (strncmp(id->beg, "u64", n) == 0 && n == 3) {
+        return LLVMInt64TypeInContext(ctx);
+    } else if (strncmp(id->beg, "f32", n) == 0 && n == 3) {
+        fatal("f32 Not supported yet");
+        return NULL;
+    } else if (strncmp(id->beg, "f64", n) == 0 && n == 3) {
+        fatal("f64 Not supported yet");
+        return NULL;
+    } else if (strncmp(id->beg, "int", n) == 0 && n == 3) {
+        return LLVMInt64TypeInContext(ctx);
+    } else if (strncmp(id->beg, "float", n) == 0 && n == 5) {
+        fatal("f64 Not supported yet");
+        return NULL;
+    }
+
+    print_token(id);
+    fatal("(CODEGEN) Invalid Type");
+    return NULL;
+}
+
+Error codegen_function_params_type(LLVMTypeRef* param_types,
+                              Node* params,
+                              int param_count,
+                              LLVMContextRef ctx) {
+    for (int i = 0; i < param_count; i++) {
+        param_types[i] = codegen_get_type(params->param->type,
+                                             ctx);
+    }
+    return OK;
+}
+
 Node* codegen_find_name_in_scope(Scope* scope, const char* name) {
     Node* beg = scope->names;
     while (beg != NULL) {
@@ -782,6 +849,8 @@ LLVMValueRef codegen_var(VariableNode* var, Scope* scope, LLVMBuilderRef builder
         fatal("Unable to find above variable\n");
     }
     printf("TESTING: %s\n", name);
+    printf("TESTING: %p\n", node->var->llvm_var_type);
+    printf("TESTING: %p\n", node->var->llvm_value_ref);
 
     return LLVMBuildLoad2(builder, node->var->llvm_var_type, node->var->llvm_value_ref, "");
 }
@@ -791,6 +860,7 @@ LLVMValueRef codegen_constant(ConstantNode* constant, LLVMContextRef ctx) {
     printf("CONSTANT: %d\n", constant->iVal);
     return LLVMConstInt(LLVMInt64TypeInContext(ctx), constant->iVal, false);
 }
+
 LLVMValueRef codegen_call(CallNode* call, Scope* scope, LLVMBuilderRef builder, LLVMModuleRef mod) {
     LLVMContextRef ctx = LLVMGetModuleContext(mod);
     int n = calc_str_len(call->name);
@@ -805,8 +875,9 @@ LLVMValueRef codegen_call(CallNode* call, Scope* scope, LLVMBuilderRef builder, 
     printf("TESTING: %s\n", name);
     LLVMValueRef* args  = calloc(1, sizeof(LLVMValueRef));
 
-    LLVMTypeRef param_types[] = { LLVMVoidType() };
-    LLVMTypeRef fn_type = LLVMFunctionType(LLVMVoidTypeInContext(ctx), param_types, 0, 0);
+    LLVMTypeRef param_types[fn->param_count];
+    codegen_function_params_type(param_types, fn->params, fn->param_count, ctx);
+    LLVMTypeRef fn_type = LLVMFunctionType(LLVMVoidTypeInContext(ctx), param_types, fn->param_count, 0);
     return LLVMBuildCall2(builder, fn->llvm_fn_type, fn->llvm_value_ref, NULL, 0, "");
 }
 
@@ -971,69 +1042,28 @@ Error codegen_block(BlockNode* block, LLVMBuilderRef builder, LLVMModuleRef mod,
     return OK;
 }
 
-LLVMTypeRef codegen_get_type(Token* id, LLVMContextRef ctx) {
-    if (id == NULL) {
-        return LLVMVoidTypeInContext(ctx);
-    }
-    char* beg = id->beg;
-    char* end = id->end;
-    int n = 1;
-    while (beg != end) {
-        beg++;
-        n++;
-    }
-    if (strncmp(id->beg, "i8", n) == 0 && n == 2) {
-        return LLVMInt8TypeInContext(ctx);
-    } else if (strncmp(id->beg, "i16", n) == 0 && n == 3) {
-        return LLVMInt16TypeInContext(ctx);
-    } else if (strncmp(id->beg, "i32", n) == 0 && n == 3) {
-        return LLVMInt32TypeInContext(ctx);
-    } else if (strncmp(id->beg, "i64", n) == 0 && n == 3) {
-        return LLVMInt64TypeInContext(ctx);
-    } else if (strncmp(id->beg, "u8", n) == 0 && n == 2) {
-        return LLVMInt8TypeInContext(ctx);
-    } else if (strncmp(id->beg, "u16", n) == 0 && n == 3) {
-        return LLVMInt16TypeInContext(ctx);
-    } else if (strncmp(id->beg, "u32", n) == 0 && n == 3) {
-        return LLVMInt32TypeInContext(ctx);
-    } else if (strncmp(id->beg, "u64", n) == 0 && n == 3) {
-        return LLVMInt64TypeInContext(ctx);
-    } else if (strncmp(id->beg, "f32", n) == 0 && n == 3) {
-        fatal("f32 Not supported yet");
-        return NULL;
-    } else if (strncmp(id->beg, "f64", n) == 0 && n == 3) {
-        fatal("f64 Not supported yet");
-        return NULL;
-    } else if (strncmp(id->beg, "int", n) == 0 && n == 3) {
-        return LLVMInt64TypeInContext(ctx);
-    } else if (strncmp(id->beg, "float", n) == 0 && n == 5) {
-        fatal("f64 Not supported yet");
-        return NULL;
-    }
-
-    fatal("(CODEGEN) Invalid Type");
-    return NULL;
-}
-
 Error codegen_function(FunctionNode* func_node, FunctionNode* func_scoped, LLVMModuleRef mod) {
     // func_scoped is the copied version of the node in the Scope
     LLVMContextRef ctx = LLVMGetModuleContext(mod);
-    printf("[DEBUG]: CODEGEN FUNCTION\n");
-    printf("[DEBUG]: ");
-    LLVMTypeRef param_types[] = { LLVMVoidType() };
-    int argc = 0;
+    LLVMTypeRef param_types[func_node->param_count];
+    codegen_function_params_type(param_types, func_node->params, func_node->param_count, ctx);
+    printf("PARAMS: %p %p\n", param_types[0], param_types[1]);
     LLVMTypeRef ret = codegen_get_type(func_node->return_types, ctx);
     //LLVMTypeRef param_types[] = {};
-    LLVMTypeRef fn_type = LLVMFunctionType(ret, param_types, argc, 0);
+    LLVMTypeRef fn_type = LLVMFunctionType(ret, param_types, func_node->param_count, 0);
     int n = calc_str_len(func_node->name);
     char name[n];
     fill_char_array(name, func_node->name, n);
+    printf("[DEBUG]: CODEGEN FUNCTION: %s\n", name);
+    printf("[DEBUG]: ");
     LLVMValueRef fn = LLVMAddFunction(mod, name, fn_type);
     LLVMBasicBlockRef entry = LLVMAppendBasicBlockInContext(ctx, fn, "entry");
     LLVMBuilderRef builder = LLVMCreateBuilderInContext(ctx);
     LLVMPositionBuilderAtEnd(builder, entry);
     //TODO : not sure what this does lol
     LLVMSetLinkage(fn, LLVMExternalLinkage);
+
+    //TODO: HANDLE GETTING PARAMETERS INTO THE FUNCTION
 
     codegen_block(func_node->block->block, builder, mod, ctx);
 
@@ -1149,18 +1179,49 @@ Node* ast_create_call(Token** token_list) {
     return ret;
 }
 
+void ast_create_param(Node** param_list, Token* type, Token* identifier) {
+    Node* res = calloc(1, sizeof(Node));
+    ParamNode* param = calloc(1, sizeof(ParamNode));
+    param->param = identifier;
+    param->type = type;
+    res->param = param;
+    res->nt = NODE_PARAM;
+    if (*param_list == NULL) {
+        *param_list = res;
+    } else {
+        (*param_list)->next = res;
+    }
+}
+
+Node* ast_parse_params(Token** token_list) {
+    Node* param_list = NULL;
+    expect(*token_list, TK_PAREN_OPEN);
+    *token_list = (*token_list)->next;
+    while ((*token_list)->tt != TK_PAREN_CLOSE) {
+        expect(*token_list, TK_IDENTIFIER);
+        Token* type = *token_list;
+        *token_list = (*token_list)->next;
+        expect(*token_list, TK_IDENTIFIER);
+        ast_create_param(&param_list, type, *token_list);
+        *token_list = (*token_list)->next;
+        if ((*token_list)->tt == TK_PAREN_CLOSE) {
+            break;
+        }
+        expect((*token_list)->next, TK_COMMA);
+        *token_list = (*token_list)->next;
+    }
+    return param_list;
+}
 
 Node* ast_create_expr_prec(Token** token_list, int precedence, bool is_args) {
     Node* lhs;
     if ((*token_list)->tt == TK_IDENTIFIER
         && (*token_list)->next->tt == TK_PAREN_OPEN) {
         // Function Call
-        //*token_list = (*token_list)->next; // skip the paren
         lhs = ast_create_call(token_list);
     } else if ((*token_list)->tt == TK_IDENTIFIER) {
         //Variable
         lhs = ast_create_variable(TYPE_UNKNOWN, *token_list);
-        //fatal("(AST GEN) Variables in expr not implemented yet\n");
     } else {
         // Constant TODO: handle quotes 
         lhs = ast_create_constant(*token_list);
@@ -1173,25 +1234,21 @@ Node* ast_create_expr_prec(Token** token_list, int precedence, bool is_args) {
         exit(1);
     }
     */
+    if (is_args && lookahead->tt == TK_PAREN_CLOSE) {
+        return lhs;
+    }
     if ((*token_list)->tt != TK_NEWLINE) {
         while(get_prec(lookahead->tt) >= precedence) {
             *token_list = (*token_list)->next; // op
             Token* op = *token_list; // operator is a lookahead
             *token_list = (*token_list)->next; // rhs
-            /*
-            if ((*token_list)->tt == TK_CONSTANT) {
-                rhs = ast_create_constant(*token_list);
-            }
-            */
             if ((*token_list)->tt == TK_IDENTIFIER
                 && (*token_list)->next->tt == TK_PAREN_OPEN) {
                 // Function Call
-                //*token_list = (*token_list)->next; // skip the paren
                 rhs = ast_create_call(token_list);
             } else if ((*token_list)->tt == TK_IDENTIFIER) {
                 // Variable
                 rhs = ast_create_variable(TYPE_UNKNOWN, *token_list);
-                //fatal("(AST GEN) Variables in expr not implemented yet\n");
             } else {
                 // Constant TODO: handle quotes 
                 rhs = ast_create_constant(*token_list);
@@ -1290,14 +1347,16 @@ Node* ast_create_block(Scope** parent_scope) {
 }
 
 Node* ast_create_function(Token* name,
-                          Node* args,
+                          Node* params,
+                          int param_count,
                           Token* return_types,
                           Node* block) {
     // TODO: args and return_types
     Node* ret = calloc(1, sizeof(Node));
     FunctionNode* _node = calloc(1, sizeof(FunctionNode));
     _node->name = name;
-    _node->args = args;
+    _node->params = params;
+    _node->param_count = param_count;
     _node->block = block;
     _node->return_types = return_types;
     
@@ -1308,6 +1367,16 @@ Node* ast_create_function(Token* name,
 
 Node* ast_create_expression(Token** token_list, bool is_args) {
     return ast_create_expr_prec(token_list, 0, is_args);
+}
+
+int ast_get_param_count(Node* param) {
+    Node* beg = param;
+    int ret = 0;
+    while (beg != NULL) {
+        ret++;
+        beg = beg->next;
+    }
+    return ret;
 }
 
 Error ast_create(Token** token_list,
@@ -1323,12 +1392,16 @@ Error ast_create(Token** token_list,
             // Expect Function definition
             current_token = current_token->next;
             expect(current_token, TK_PAREN_OPEN);
-            // TODO: HANDLE ARGUMENTS
-            Node* args = NULL;
-            current_token = current_token->next;
+            // TODO: HANDLE PARAMETERS
+            Node* params = NULL;
+            *token_list = current_token;
+            current_token = current_token->next; // skip paren_open
+            params = ast_parse_params(token_list);
+            int param_count = ast_get_param_count(params);
+            current_token = *token_list;
             expect(current_token, TK_PAREN_CLOSE);
-
             current_token = current_token->next;
+
             Token* func_ret = NULL;
             if (current_token->tt == TK_ARROW) {
                 //TODO: handle RETURN TYPE
@@ -1350,9 +1423,12 @@ Error ast_create(Token** token_list,
             // TODO: Constants
             current_token = *token_list;
             expect(current_token, TK_CURLY_CLOSE);
-            Node* func = ast_create_function(name, args, func_ret, block);
+            Node* func = ast_create_function(name, params, param_count, func_ret, block);
             ast_add_node(ast, func);
             func->func->scoped_node = ast_scope_add(scope, func);
+            if (params != NULL) {
+                ast_scope_add(&(func->func->block->block->scope), params);
+            }
             //block_scope->parent_scope = *scope;
             //ast_add_scope(scope, func);
         }
@@ -1445,7 +1521,6 @@ int main(int argc, char** argv) {
     printf("[DEBUG]: Printing Root Scope...\n");
     print_nodes(root_scope->names);
 
-    //codegen_start_help(ast_root);
     printf("[DEBUG]: STARTING CODEGEN...\n");
     codegen_start(ast_root);
     return 0;
