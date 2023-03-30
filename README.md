@@ -6,7 +6,7 @@ The Compiler has just started development so it doesn't do anything as of yet:
 - [X] Parser 
 - [ ] AST Generation
   - [ ] Function Nodes
-    - [ ] Arguments
+    - [ ] Parameters
     - [X] Return Types
     - [X] Block
   - [X] Block Nodes
@@ -14,10 +14,12 @@ The Compiler has just started development so it doesn't do anything as of yet:
   - [X] Variable Declaration Nodes
   - [X] Assignment Nodes
   - [X] Call Nodes
+    - [ ] Arguments
 - [ ] Type Checking
 - [ ] Codegen (LLVM)
   - [X] Constants
   - [X] Variable Declaration
+  - [X] Function Declaration
   - [ ] Assignments
   - [X] Return
   
@@ -72,9 +74,14 @@ main () {
 This incredibly useless and simple program demonstrates what is working at the moment.
 ```C
 // simple.atl
+random_function () -> int {
+    -> 10
+}
+
 main () {
     i32 :: test = 1 * 2 + 4 * 3
     i64 :: test2 = 4
+    int :: test2 = random_function() + 1 + test2 // int is treated as i64 by default 
     -> 5
 }
 ```
