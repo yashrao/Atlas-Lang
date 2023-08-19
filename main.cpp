@@ -3,6 +3,10 @@
 #include <fstream>
 #include <vector>
 #include <cctype>
+#include <cstring>
+
+// debug
+#include <memory>
 
 // Colors
 const char* CL_BLACK   = "\e[0;30m";
@@ -15,7 +19,7 @@ const char* CL_CYAN    = "\e[0;36m";
 const char* CL_WHITE   = "\e[0;37m";
 const char* CL_RESET   = "\e[0m";
 
-enum TokenType{
+enum TokenType {
     TK_NEWLINE = 100,
     TK_PLUS,
     TK_DASH,
@@ -101,9 +105,14 @@ struct VarNode : Node {
     //struct Node* scoped_var;
 };
 
+struct CallNode : Node {
+    Token* name;
+    std::vector<struct ExpressionNode*> args;
+};
+
 struct BinaryOpNode : Node {
-    Node* lhs;
-    Node* rhs;
+    struct ExpressionNode* lhs;
+    struct ExpressionNode* rhs;
     Token* op;
 };
 
@@ -121,6 +130,7 @@ struct ExpressionNode : Node {
         ConstantNode* constant;
         UnaryOpNode* unary_op;
         VarNode* var_node;
+        CallNode* call_node;
     };
 };
 
@@ -129,11 +139,28 @@ struct VarDeclNode : Node {
     VarNode* lhs;
     ExpressionNode* rhs;
 };
+
+struct ParamNode : Node {
+    Token* type;
+};
+
+struct FunctionNode : Node {
+    std::vector<ParamNode*> params;
+    struct BlockNode* block;
+    Token* return_types;
+};
+
+struct ReturnNode : Node {
+    ExpressionNode* expr;
+};
+
 struct StatementNode : Node {
     // LHS
     union {
         VarDeclNode* vardecl_lhs;
+        FunctionNode* func_lhs;
         ExpressionNode* expr_lhs;
+        ReturnNode* return_lhs;
     };
     // RHS
     union {
@@ -142,18 +169,10 @@ struct StatementNode : Node {
 };
 
 struct BlockNode : Node {
-    std::vector<StatementNode*> statements;
+    std::vector<StatementNode*>* statements;
 };
 
-struct ParamNode : Node {
-    Token* type;
-};
-
-struct FunctionNode : Node {
-    std::vector<ParamNode*> params;
-    BlockNode* block;
-    Token* return_types;
-};
+ExpressionNode* ast_create_expression(std::vector<Token*> tokens, bool is_args, int* i);
 
 const char* get_tt_str(TokenType tt) {
     if (tt == TK_NEWLINE) {
@@ -318,6 +337,15 @@ bool is_delim(char c) {
     return false;
 }
 
+int is_number(std::string str) {
+    for (char c : str) {
+        if (!isdigit(c)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::vector<Token*> tokenize (std::string src) {
     std::vector<Token*> ret;
     int line = 1;
@@ -344,7 +372,11 @@ std::vector<Token*> tokenize (std::string src) {
             // TODO: new token
             TokenType tt = TK_INVALID;
             if(!prev_delim) {
-                ret.push_back(save_token(line, column, TK_IDENTIFIER, current_token_string));
+                if (is_number(current_token_string)) {
+                    ret.push_back(save_token(line, column, TK_CONSTANT, current_token_string));
+                } else {
+                    ret.push_back(save_token(line, column, TK_IDENTIFIER, current_token_string));
+                }
                 current_token = new Token;
                 current_token_string.clear();
                 column++;
@@ -433,8 +465,8 @@ void print_tabs(int tab_level) {
 void print_node(Node* node, int tab_level) {
     printf("[DEBUG]: ");
     print_tabs(tab_level);
-    //printf(" %s├─%s", CL_YELLOW, CL_RESET);
-    printf(" %s->%s", CL_YELLOW, CL_RESET);
+    printf(" %s├─%s", CL_YELLOW, CL_RESET);
+    //printf(" %s->%s", CL_YELLOW, CL_RESET);
     printf(" ");
     /*
     switch(node->nt) {
@@ -551,13 +583,42 @@ ExpressionNode* ast_create_binop(ExpressionNode* lhs, ExpressionNode* rhs, Token
     ret->nt = NODE_BINOP;
     bin_op->nt = NODE_BINOP;
     return ret;
-    exit(1);
 }
 
+ExpressionNode* ast_create_call(Token* name, std::vector<Token*> tokens, int* i) {
+    ExpressionNode* ret = new ExpressionNode;
+    CallNode* call = new CallNode;
+    std::vector<ExpressionNode*> args;
+    (*i)++; // the index should be at the open_paren
+    (*i)++; // the index should be at the first part of the expr
+    for (; *i < tokens.size(); (*i)++) {
+        Token* current_token = tokens[*i];
+        if (current_token->tt == TK_PAREN_CLOSE) {
+            break;
+        }
+        std::cout << "\t\tWWOOOOOOOOOOOO";
+        print_token(current_token);
+        args.push_back(ast_create_expression(tokens, true, i));
+    }
+    call->args = args;
+    ret->call_node = call;
+    call->name = name;
+    ret->nt = NODE_CALL;
+    return ret;
+}
 
-ExpressionNode* ast_create_call() {
-    std::cout << "ast_create_call() NOT IMPLEMENTED YET\n";
-    exit(1);
+StatementNode* ast_create_return(std::vector<Token*> tokens, int* i) {
+    StatementNode* ret = new StatementNode;
+    ReturnNode* ret_node = new ReturnNode;
+    (*i)++;
+    std::cout << "RETURN AST\n";
+    ret_node->expr = ast_create_expression(tokens, false, i);
+    ret->nt = NODE_RETURN;
+
+    ret->return_lhs = ret_node;
+    ret_node->nt = ret_node->expr->nt;
+
+    return ret;
 }
 
 VarDeclNode* ast_create_var_decl(VarType type, Token* identifier, ExpressionNode* rhs) {
@@ -587,9 +648,16 @@ ExpressionNode* ast_create_variable_expr(VarType type, Token* identifier) {
     return ret;
 }
 
-ExpressionNode* ast_create_constant(std::vector<Token*> tokens, int* i) {
-    std::cout << "ast_create_constant() NOT IMPLEMENTED YET\n";
-    exit(1);
+ExpressionNode* ast_create_constant(Token* constant_value) {
+    ExpressionNode* ret = new ExpressionNode;
+    ConstantNode* constant = new ConstantNode;
+    std::cout << "WEEEEEW: " << constant_value->token << "\n";
+    constant->value = stoi(constant_value->token);
+    std::cout << "WEEEEEW2: " << constant->value << "\n";
+    ret->nt = NODE_CONSTANT;
+
+    ret->constant = constant;
+    return ret;
 }
 
 int get_prec(TokenType tt) {
@@ -629,14 +697,17 @@ ast_create_expr_prec(
     Token* current_token = tokens[*i];
     Token* lookahead = ast_get_lookahead(tokens, i);
     if (current_token->tt == TK_IDENTIFIER && lookahead->tt == TK_PAREN_OPEN) {
-        lhs = ast_create_call();
+        // TODO: support for args
+        lhs = ast_create_call(current_token, tokens, i);
+        current_token = next_token(tokens, i); // closed bracket
     } else if (current_token->tt == TK_IDENTIFIER) {
         lhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i]);
     } else if (current_token->tt == TK_CONSTANT) {
-        lhs = ast_create_constant(tokens, i);
+        lhs = ast_create_constant(tokens[*i]);
     }
     //operator is the lookahead
     ExpressionNode* rhs = NULL;
+
     if (is_args && lookahead->tt == TK_PAREN_CLOSE) {
         return lhs;
     }
@@ -651,13 +722,16 @@ ast_create_expr_prec(
                 && lookahead->tt == TK_PAREN_OPEN) {
                 // Function Call
                 //rhs = ast_create_call(tokens);
-                rhs = ast_create_call();
+                //current_token = next_token(tokens, i); // closed bracket
+                rhs = ast_create_call(current_token, tokens, i);
             } else if (current_token->tt == TK_IDENTIFIER) {
                 // Variable
                 rhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i]);
-            } else {
+            } else if (current_token->tt == TK_CONSTANT) {
                 // Constant TODO: handle quotes 
-                rhs = ast_create_constant(tokens, i);
+                rhs = ast_create_constant(tokens[*i]);
+            } else {
+                return lhs;
             }
             lookahead = ast_get_lookahead(tokens, i);
             // TODO: handle left associativity
@@ -724,14 +798,18 @@ VarType get_var_type(Token* var_type) {
 }
 
 BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
-    std::vector<StatementNode*> statements;
+    std::vector<StatementNode*>* statements = new std::vector<StatementNode*>;
     BlockNode* block = new BlockNode;
+    block->nt = NODE_BLOCK;
     for (; *i < tokens.size(); (*i)++) {
         Token* current_token = tokens[*i];
         print_token(current_token);
         std::cout << *i << "\n";
         std::cout << tokens.size() << "\n";
         std::cout << current_token->tt << "\n";
+        if (current_token->tt == TK_CURLY_CLOSE) {
+            break;
+        }
         if (current_token->tt == TK_IDENTIFIER) {
             //expect(current_token, TK_IDENTIFIER);
             Token* type = current_token;
@@ -751,8 +829,13 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             statement->nt = NODE_VAR_DECL;
             statement->vardecl_lhs = lhs;
             statement->expr_rhs = rhs;
-            statements.push_back(statement);
+            statements->push_back(statement);
             //statement->lhs::expr = NULL;
+        } else if (current_token->tt == TK_ARROW) {
+                std::cout <<"->-<-\n";
+                StatementNode* statement = ast_create_return(tokens, i);
+                statement->nt = NODE_RETURN;
+                statements->push_back(statement);
         }
     }
     block->statements = statements;
@@ -767,7 +850,7 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
         TokenType tt = current_token->tt;
         if (!is_block) {
             if (tt == TK_IDENTIFIER) {
-                //TODO: check if its reserved keyword like type/enum/etc...
+                //Tast_createODO: check if its reserved keyword like type/enum/etc...
                 FunctionNode* fn = new FunctionNode{};
                 fn->nt = NODE_FUNC;
                 // Function Name
@@ -782,15 +865,223 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
                     fn->params = params;
                     expect(current_token, TK_PAREN_CLOSE);
                     current_token = next_token(tokens, &i);
+                    if (current_token->tt == TK_ARROW) {
+                        // parse return types
+                        // TODO: support multiple types
+                        current_token = next_token(tokens, &i);
+                        auto type = current_token;
+                        fn->return_types = type;
+                        current_token = next_token(tokens, &i);
+                    } else {
+                        fn->return_types = NULL;
+                        //current_token = next_token(tokens, &i);
+                    }
+                    //current_token = next_token(tokens, &i);
                     expect(current_token, TK_CURLY_OPEN);
                     block = ast_create_block(tokens, &i);
                 }
                 fn->block = block;
-            }
+                StatementNode* stmt = new StatementNode;
+                stmt->nt = NODE_FUNC;
+                stmt->func_lhs = fn;
+                ret.push_back(stmt);
+                std::cout << "TEST: " << block->statements->size() << "\n";
+            }  
         }
     }
     return ret;
 }
+
+/* Codegen */
+/*
+static char* reglist[4]= { "%r8", "%r9", "%r10", "%r11" };
+static int freereg[4];
+
+void codegen_free_all_regs() {
+    freereg[0] = freereg[1] = freereg[2] = freereg[3] = 1;
+}
+
+void codegen_free_reg(int reg) {
+    if (freereg[reg] != 0) {
+        std::cerr << "Error trying to free register " << reg << "\n";
+    }
+    freereg[reg] = 1;
+}
+
+void codegen_init(std::ofstream* file) {
+    codegen_free_all_regs();
+	*file << "\t.text\n"
+	      << ".LC0:\n"
+	      << "\t.string\t\"%d\\n\"\n"
+	      << "printint:\n"
+	      << "\tpushq\t%rbp\n"
+	      << "\tmovq\t%rsp, %rbp\n"
+	      << "\tsubq\t$16, %rsp\n"
+	      << "\tmovl\t%edi, -4(%rbp)\n"
+	      << "\tmovl\t-4(%rbp), %eax\n"
+	      << "\tmovl\t%eax, %esi\n"
+	      << "\tleaq	.LC0(%rip), %rdi\n"
+	      << "\tmovl	$0, %eax\n"
+	      << "\tcall	printf@PLT\n"
+	      << "\tnop\n"
+	      << "\tleave\n"
+	      << "\tret\n"
+	      << "\n"
+	      << "\t.globl\tmain\n"
+	      << "\t.type\tmain, @function\n"
+	      << "main:\n"
+	      << "\tpushq\t%rbp\n"
+	      << "\tmovq	%rsp, %rbp\n";
+}
+*/
+
+void atlas_lib(std::ofstream* file) {
+    *file << "#define SYSCALL_EXIT 60\n"
+          << "#define SYSCALL_WRITE 1\n"
+          << "typedef unsigned char uchar;\n"
+          << "typedef unsigned char byte;\n"
+          << "typedef char sbyte;\n"
+          << "typedef short int16;\n"
+          << "typedef unsigned short uint16;\n"
+          << "typedef unsigned short ushort;\n"
+          << "typedef int int32;\n"
+          << "typedef unsigned int uint32;\n"
+          << "typedef unsigned int uint;\n"
+          << "typedef long long int64;\n"
+          << "typedef unsigned long long uint64;\n";
+
+    *file << "\n";
+
+    *file << "void sys_exit(int error_code)\n"
+          << "{\n"
+          << "\tasm volatile\n"
+          << "\t(\n"
+          << "\t\t\"syscall\"\n"
+          << "\t\t:\n" 
+          << "\t\t: \"a\"(SYSCALL_EXIT), \"D\"(error_code)\n"
+          << "\t\t: \"rcx\", \"r11\", \"memory\"\n"
+          << "\t);\n"
+          << "}\n\n";
+
+	*file << "int sys_write(unsigned fd, const char* buf, unsigned count)\n"
+          << "{\n"
+          << "\tunsigned ret;\n"
+          << "\tasm volatile\n"
+          << "\t(\n"
+          << "\t\t\"syscall\"\n"
+          << "\t\t: \"=a\"(ret)\n"
+          << "\t\t: \"a\"(SYSCALL_WRITE), \"D\"(fd), \"S\"(buf), \"d\"(count)\n"
+          << "\t\t: \"rcx\", \"r11\", \"memory\"\n"
+          << "\t);\n"
+          << "\treturn ret;\n"
+          << "}\n\n";
+}
+
+void codegen_init_c(std::vector<StatementNode*> ast, std::ofstream* file) {
+	*file << "void _start(void)\n"
+          << "{\n"
+          << "\t\n";
+    for (StatementNode* statement : ast) {
+        if (statement->nt == NODE_FUNC) {
+            *file << "\t" << statement->func_lhs->token->token << "();\n";
+        }
+    }
+
+    *file << "\tsys_exit(0);\n"
+          << "}\n\n";
+}
+
+void codegen_end(std::ofstream* file) {
+    //*file << "\tmovl	$0, %eax\n"
+	//      << "\tpopq	%rbp\n"
+	//      << "\tret\n";
+    (*file).close();
+}
+
+void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
+    switch(expression->nt) {
+        case NODE_BINOP:
+            codegen_expr(expression->binop->lhs, file);
+            *file << " " << expression->binop->op->token << " ";
+            codegen_expr(expression->binop->rhs, file);
+            break;
+        case NODE_CONSTANT:
+            *file << expression->constant->value;
+            break;
+        case NODE_CALL:
+            *file << expression->call_node->name->token << "("; 
+            for (auto arg : expression->call_node->args) {
+                codegen_expr(arg, file);
+            }
+            *file << ")";
+            break;
+        default:
+            std::cout << "[ERROR]: CODEGEN EXPR " << expression->nt << "\n";
+            exit(1);
+    }
+}
+
+void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
+    if (var_decl->lhs->type == TYPE_I64) {
+        *file << "\tint64 " << var_decl->lhs->identifier->token;
+    }
+    if (var_decl->rhs != NULL) {
+        *file << " = ";
+        codegen_expr(var_decl->rhs, file);
+    }
+    *file << ";\n";
+}
+
+void codegen_return(StatementNode* statement, std::ofstream* file) {
+    *file << "\treturn ";
+    codegen_expr(statement->return_lhs->expr, file);
+    *file << ";\n";
+}
+
+void codegen_statement(StatementNode* statement, std::ofstream* file) {
+    switch(statement->nt) {
+        case NODE_VAR_DECL:
+            codegen_var_decl(statement->vardecl_lhs, file);
+            break;
+        case NODE_RETURN:
+            codegen_return(statement, file);
+            break;
+    }
+}
+
+void codegen_func(FunctionNode* func, std::ofstream* file) {
+    if (func->return_types == NULL) {
+        *file << "void ";
+    } else {
+        if (func->return_types->token == "i64") {
+            *file << "int64 ";
+        }
+    }
+    *file << func->token->token << "(void)" << "\n{\n";
+    if (func->block != NULL) {
+        BlockNode* block = func->block;
+        for (StatementNode* statement : *(block->statements)) {
+            codegen_statement(statement, file);
+        }
+    }
+    *file << "}\n";
+}
+
+void codegen_start(std::vector<StatementNode*> ast, std::string filename) {
+    std::ofstream file(filename);
+    atlas_lib(&file);
+    std::cout << "Ast size: " << ast.size() << "\n";
+    for (StatementNode* node : ast) {
+        std::cout << "KEK: " <<  node->nt << "\n";
+        if (node->nt == NODE_FUNC) {
+            codegen_func(node->func_lhs, &file);
+        }  
+    }
+    codegen_init_c(ast, &file);
+    codegen_end(&file);
+}
+
+/* Codegen end */
 
 int main(int argc, char** argv) {
     if (argc != 2) {
@@ -805,6 +1096,9 @@ int main(int argc, char** argv) {
     std::cout << "######TOKENIZING END#######\n\n";
     std::cout << "########AST START##########\n";
     auto ast = ast_create(tokens);
-    std::cout << "##########AST END##########\n";
+    std::cout << "##########AST END##########\n\n";
+    std::cout << "######CODEGEN START########\n";
+    codegen_start(ast, "out.c");
+    std::cout << "######CODEGEN END##########\n";
     return 0;
 }
