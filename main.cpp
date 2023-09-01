@@ -51,7 +51,8 @@ enum TokenType {
     TK_SQUARE_CLOSE,
     TK_INVALID,
     TK_RETURN,
-    TK_IF
+    TK_IF,
+    TK_ELSE
 };
 
 struct Token {
@@ -139,6 +140,12 @@ struct ExpressionNode : Node {
 struct IfNode : Node {
     struct BlockNode* block;
     ExpressionNode* condition;
+    struct ElseNode* _else; // can be NULL
+};
+
+struct ElseNode : Node {
+    struct StatementNode* else_if; // can be NULL
+    struct BlockNode* block;
 };
 
 struct VarDeclNode : Node {
@@ -365,6 +372,8 @@ TokenType tokenize_get_reserved_word(std::string word) {
     // assumes not a number/constant
     if (word == "if") {
         return TK_IF;
+    } else if (word == "else") {
+        return TK_ELSE;  
     } else if (word == "for") {
         std::cout << "[ERROR]: FOR NOT IMPLEMENTED YET\n";
         exit(1);
@@ -740,7 +749,6 @@ ast_create_expr_prec(
     Token* lookahead = ast_get_lookahead(tokens, i);
     if (current_token->tt == TK_IDENTIFIER && lookahead->tt == TK_PAREN_OPEN) {
         lhs = ast_create_call(current_token, tokens, i);
-        //current_token = next_token(tokens, i); // next token
     } else if (current_token->tt == TK_IDENTIFIER) {
         lhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i]);
     } else if (current_token->tt == TK_CONSTANT) {
@@ -761,14 +769,11 @@ ast_create_expr_prec(
         while(get_prec(lookahead->tt) >= precedence) {
             current_token = next_token(tokens, i);
             Token* op = current_token; // operator is a lookahead
-            //*token_list = (*token_list)->next; // rhs
             current_token = next_token(tokens, i); // rhs
             lookahead = ast_get_lookahead(tokens, i);
             if (current_token->tt == TK_IDENTIFIER
                 && lookahead->tt == TK_PAREN_OPEN) {
                 // Function Call
-                //rhs = ast_create_call(tokens);
-                //current_token = next_token(tokens, i); // closed bracket
                 rhs = ast_create_call(current_token, tokens, i);
             } else if (current_token->tt == TK_IDENTIFIER) {
                 // Variable
@@ -802,10 +807,6 @@ ast_create_expr_prec(
                 current_token->tt == TK_COMMA) {
                 break;
             }
-            // if (is_args && current_token->tt == TK_PAREN_CLOSE) {
-            //     (*i)++; // Throw away closed bracket
-            //     break;
-            // } 
         }
     }
     //print_node(lhs, 0);
@@ -850,13 +851,29 @@ VarType get_var_type(Token* var_type) {
 StatementNode* ast_create_if(std::vector<Token*> tokens, int* i) {
     StatementNode* ret = new StatementNode;
     IfNode* if_node = new IfNode;
+    if_node->_else = NULL;
     Token* current_token = next_token(tokens, i); // skip if token
     ExpressionNode* cond = ast_create_expression(tokens, false, true, i);
     std::cout << "AST_IFS\n";
     print_token(tokens[*i]);
     (*i)++;
     BlockNode* block = ast_create_block(tokens, i);
-
+    Token* lookahead = ast_get_lookahead(tokens, i);
+    if (lookahead != NULL && lookahead->tt == TK_ELSE) {
+        ElseNode* _else = new ElseNode;
+        current_token = next_token(tokens, i); // else - skip
+        current_token = next_token(tokens, i); // if OR {
+        StatementNode* else_if = NULL;
+        BlockNode* block_else = NULL;
+        if (current_token->tt == TK_IF) {
+            else_if = ast_create_if(tokens, i);
+        } else if (current_token->tt == TK_CURLY_OPEN) {
+            block_else = ast_create_block(tokens, i);
+        }
+        _else->else_if = else_if;
+        _else->block = block_else;
+        if_node->_else = _else;
+    }
     if_node->nt = NODE_IF;
     if_node->condition = cond;
     if_node->block = block;
@@ -904,7 +921,7 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             StatementNode* statement = ast_create_if(tokens, i);
             statement->nt = NODE_IF;
             statements->push_back(statement);
-        }
+        } 
     }
     block->statements = statements;
     return block;
@@ -960,49 +977,6 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
     }
     return ret;
 }
-
-/* Codegen */
-/*
-static char* reglist[4]= { "%r8", "%r9", "%r10", "%r11" };
-static int freereg[4];
-
-void codegen_free_all_regs() {
-    freereg[0] = freereg[1] = freereg[2] = freereg[3] = 1;
-}
-
-void codegen_free_reg(int reg) {
-    if (freereg[reg] != 0) {
-        std::cerr << "Error trying to free register " << reg << "\n";
-    }
-    freereg[reg] = 1;
-}
-
-void codegen_init(std::ofstream* file) {
-    codegen_free_all_regs();
-	*file << "\t.text\n"
-	      << ".LC0:\n"
-	      << "\t.string\t\"%d\\n\"\n"
-	      << "printint:\n"
-	      << "\tpushq\t%rbp\n"
-	      << "\tmovq\t%rsp, %rbp\n"
-	      << "\tsubq\t$16, %rsp\n"
-	      << "\tmovl\t%edi, -4(%rbp)\n"
-	      << "\tmovl\t-4(%rbp), %eax\n"
-	      << "\tmovl\t%eax, %esi\n"
-	      << "\tleaq	.LC0(%rip), %rdi\n"
-	      << "\tmovl	$0, %eax\n"
-	      << "\tcall	printf@PLT\n"
-	      << "\tnop\n"
-	      << "\tleave\n"
-	      << "\tret\n"
-	      << "\n"
-	      << "\t.globl\tmain\n"
-	      << "\t.type\tmain, @function\n"
-	      << "main:\n"
-	      << "\tpushq\t%rbp\n"
-	      << "\tmovq	%rsp, %rbp\n";
-}
-*/
 
 void atlas_lib(std::ofstream* file) {
     *file << "#define SYSCALL_EXIT 60\n"
@@ -1165,6 +1139,17 @@ void codegen_if(IfNode* if_node, std::ofstream* file, int tab_level) {
     codegen_expr(if_node->condition, file);
     *file << ")\n";
     codegen_block(if_node->block, file, tab_level + 1);
+    if (if_node->_else != NULL) {
+        if (if_node->_else->block != NULL) {
+            codegen_tabs(file, tab_level);
+            *file << "else\n";
+            codegen_block(if_node->_else->block, file, tab_level + 1);
+        } else if (if_node->_else->else_if != NULL) {
+            codegen_tabs(file, tab_level);
+            *file << " else ";
+            codegen_if(if_node->_else->else_if->if_lhs, file, tab_level);
+        }
+    }
 }
 
 void codegen_statement(StatementNode* statement, std::ofstream* file, int tab_level) {
