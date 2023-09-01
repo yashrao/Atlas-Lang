@@ -52,7 +52,8 @@ enum TokenType {
     TK_INVALID,
     TK_RETURN,
     TK_IF,
-    TK_ELSE
+    TK_ELSE,
+    TK_FOR
 };
 
 struct Token {
@@ -92,6 +93,7 @@ enum NodeType {
     NODE_VAR,
     NODE_RETURN,
     NODE_IF,
+    NODE_FOR,
 };
 
 struct Node {
@@ -137,6 +139,13 @@ struct ExpressionNode : Node {
     };
 };
 
+struct ForNode : Node {
+    struct StatementNode* init;
+    ExpressionNode* test;
+    struct StatementNode* update;
+    struct BlockNode* block;
+};
+
 struct IfNode : Node {
     struct BlockNode* block;
     ExpressionNode* condition;
@@ -176,6 +185,7 @@ struct StatementNode : Node {
         ExpressionNode* expr_lhs;
         ReturnNode* return_lhs;
         IfNode* if_lhs;
+        ForNode* for_lhs;
     };
     // RHS
     union {
@@ -258,6 +268,8 @@ const char* get_tt_str(TokenType tt) {
         return "TK_IF";
     } else if (tt == TK_EQUAL) {
         return "TK_EQUAL";
+    } else if (tt == TK_FOR) {
+        return "TK_FOR";
     } else {
         return "TK_INVALID";
     }
@@ -375,8 +387,7 @@ TokenType tokenize_get_reserved_word(std::string word) {
     } else if (word == "else") {
         return TK_ELSE;  
     } else if (word == "for") {
-        std::cout << "[ERROR]: FOR NOT IMPLEMENTED YET\n";
-        exit(1);
+        return TK_FOR;
     } else {
         return TK_IDENTIFIER;
     }
@@ -708,12 +719,17 @@ ExpressionNode* ast_create_constant(Token* constant_value) {
 int get_prec(TokenType tt) {
     switch(tt) {
     case TK_PAREN_OPEN:
-        return 4;
+        return 5;
     case TK_STAR:
     case TK_SLASH:
-        return 3;
+        return 4;
     case TK_PLUS:
     case TK_DASH:
+        return 3;
+    case TK_GT:
+    case TK_LT:
+    case TK_GTE:
+    case TK_LTE:
         return 2;
     case TK_EQUAL:
         return 1;
@@ -848,14 +864,27 @@ VarType get_var_type(Token* var_type) {
     return TYPE_INVALID;
 }
 
+StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
+    StatementNode* ret = new StatementNode;
+    ForNode* for_node = new ForNode;
+
+    Token* current_token = next_token(tokens, i); // skip for
+    //TODO: make it more generic for other types of statements
+    // init statement
+    // for now assuming its a var_decl but need to fix this later
+    print_token(current_token);
+    VarDeclNode* ast_create_var_decl()
+    exit(50);
+    // test expression
+    // update statement
+}
+
 StatementNode* ast_create_if(std::vector<Token*> tokens, int* i) {
     StatementNode* ret = new StatementNode;
     IfNode* if_node = new IfNode;
     if_node->_else = NULL;
     Token* current_token = next_token(tokens, i); // skip if token
     ExpressionNode* cond = ast_create_expression(tokens, false, true, i);
-    std::cout << "AST_IFS\n";
-    print_token(tokens[*i]);
     (*i)++;
     BlockNode* block = ast_create_block(tokens, i);
     Token* lookahead = ast_get_lookahead(tokens, i);
@@ -921,7 +950,12 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             StatementNode* statement = ast_create_if(tokens, i);
             statement->nt = NODE_IF;
             statements->push_back(statement);
-        } 
+        } else if (current_token->tt == TK_FOR) {
+            StatementNode* statement = ast_create_for(tokens, i);
+            statement->nt = NODE_FOR;
+            statements->push_back(statement);
+            exit(50);
+        }
     }
     block->statements = statements;
     return block;
@@ -960,9 +994,7 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
                         current_token = next_token(tokens, &i);
                     } else {
                         fn->return_types = NULL;
-                        //current_token = next_token(tokens, &i);
                     }
-                    //current_token = next_token(tokens, &i);
                     expect(current_token, TK_CURLY_OPEN);
                     block = ast_create_block(tokens, &i);
                 }
