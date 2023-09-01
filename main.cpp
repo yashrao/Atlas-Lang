@@ -182,8 +182,9 @@ struct BlockNode : Node {
 
 ExpressionNode* ast_create_expression(std::vector<Token*> tokens, bool is_args, bool is_cond, int* i);
 ExpressionNode* ast_create_expr_prec(std::vector<Token*> tokens, int precedence, bool is_args, bool is_cond, int* i);
-void codegen_block(BlockNode* block, std::ofstream* file);
+void codegen_block(BlockNode* block, std::ofstream* file, int tab_level);
 BlockNode* ast_create_block(std::vector<Token*> tokens, int* i);
+void codegen_tabs(std::ofstream* file, int tab_level);
 
 const char* get_tt_str(TokenType tt) {
     if (tt == TK_NEWLINE) {
@@ -248,6 +249,8 @@ const char* get_tt_str(TokenType tt) {
         return "TK_ASSIGN";
     } else if (tt == TK_IF) {
         return "TK_IF";
+    } else if (tt == TK_EQUAL) {
+        return "TK_EQUAL";
     } else {
         return "TK_INVALID";
     }
@@ -260,8 +263,7 @@ void print_token(Token* token) {
 }
 
 void print_error_msg(const char* error) {
-    std::cout << "%s[ERROR]:%s %s\n" <<
-            CL_RED << CL_RESET << error;
+    std::cout << CL_RED << "[COMPILER ERROR]: " << CL_RESET << error << "\n";
 }
 
 void print_tokens (std::vector<Token*> tokens) {
@@ -415,7 +417,12 @@ std::vector<Token*> tokenize (std::string src) {
                 line++;
             } else if (c == '+' || c == '(' || c == ')' || c == '*' ||
                        c == '{' || c == '}' || c == '=') {
-                ret.push_back(save_token(line, column, get_tt(c), std::string(1, c)));
+                if (c == '=' && lookahead == '=') {
+                    i += 1;
+                    ret.push_back(save_token(line, column, TK_EQUAL, "=="));
+                } else {
+                    ret.push_back(save_token(line, column, get_tt(c), std::string(1, c)));
+                }
             } else if (c == ':') {
                 if (lookahead == ':') {
                     i += 1;
@@ -592,7 +599,6 @@ std::vector<ParamNode*> ast_parse_params(std::vector<Token*> tokens, int* index)
         current_token = next_token(tokens, index);
         params.push_back(ast_create_param(type, name));
         
-        std::cout << "IS THIS THE WAY\n";
         if (current_token->tt == TK_COMMA) {
             current_token = next_token(tokens, index); // skip the comma
         } else if (current_token->tt == TK_PAREN_CLOSE) {
@@ -652,11 +658,12 @@ StatementNode* ast_create_return(std::vector<Token*> tokens, int* i) {
     return ret;
 }
 
-VarDeclNode* ast_create_var_decl(VarType type, Token* identifier, ExpressionNode* rhs) {
+VarDeclNode* ast_create_var_decl(VarType type, Token* type_id, Token* identifier, ExpressionNode* rhs) {
     VarDeclNode* ret = new VarDeclNode;
     VarNode* _node = new VarNode;
     //VariableNode* _node = calloc(1, sizeof(VariableNode));
     ret->nt = NODE_VAR_DECL;
+    _node->type_ = type_id;
     _node->nt = NODE_VAR_DECL;
     _node->type = type;
     _node->identifier = identifier;
@@ -682,9 +689,7 @@ ExpressionNode* ast_create_variable_expr(VarType type, Token* identifier) {
 ExpressionNode* ast_create_constant(Token* constant_value) {
     ExpressionNode* ret = new ExpressionNode;
     ConstantNode* constant = new ConstantNode;
-    std::cout << "WEEEEEW: " << constant_value->token << "\n";
     constant->value = stoi(constant_value->token);
-    std::cout << "WEEEEEW2: " << constant->value << "\n";
     ret->nt = NODE_CONSTANT;
 
     ret->constant = constant;
@@ -694,17 +699,22 @@ ExpressionNode* ast_create_constant(Token* constant_value) {
 int get_prec(TokenType tt) {
     switch(tt) {
     case TK_PAREN_OPEN:
-        return 3;
+        return 4;
     case TK_STAR:
     case TK_SLASH:
-        return 2;
+        return 3;
     case TK_PLUS:
     case TK_DASH:
+        return 2;
+    case TK_EQUAL:
         return 1;
     case TK_NEWLINE:
+    case TK_CURLY_OPEN:
+    case TK_PAREN_CLOSE:
         return -1;
     default:
         print_error_msg("Invalid Operator");
+        std::cout << "Operator: " << get_tt_str(tt) << ':' << tt << "\n";
         exit(1);
     }
 }
@@ -729,9 +739,8 @@ ast_create_expr_prec(
     Token* current_token = tokens[*i];
     Token* lookahead = ast_get_lookahead(tokens, i);
     if (current_token->tt == TK_IDENTIFIER && lookahead->tt == TK_PAREN_OPEN) {
-        // TODO: support for args
         lhs = ast_create_call(current_token, tokens, i);
-        current_token = next_token(tokens, i); // closed bracket
+        //current_token = next_token(tokens, i); // next token
     } else if (current_token->tt == TK_IDENTIFIER) {
         lhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i]);
     } else if (current_token->tt == TK_CONSTANT) {
@@ -740,10 +749,15 @@ ast_create_expr_prec(
     //operator is the lookahead
     ExpressionNode* rhs = NULL;
 
-    if (is_args && lookahead->tt == TK_PAREN_CLOSE) {
+    // Make sure it is updated
+    current_token = tokens[*i];  
+    lookahead = ast_get_lookahead(tokens, i);
+
+    if (is_args && current_token->tt == TK_PAREN_CLOSE) {
+        (*i)++; // Throw away closed bracket
         return lhs;
     }
-    if (current_token->tt != TK_NEWLINE) {
+    if (current_token->tt != TK_NEWLINE && lookahead->tt != TK_CURLY_OPEN) {
         while(get_prec(lookahead->tt) >= precedence) {
             current_token = next_token(tokens, i);
             Token* op = current_token; // operator is a lookahead
@@ -767,7 +781,7 @@ ast_create_expr_prec(
             }
             lookahead = ast_get_lookahead(tokens, i);
             // TODO: handle left associativity
-            printf("LOOKAHEAD\n");
+            std::cout << "LOOKAHEAD\n";
             print_token(lookahead);
             print_token(op);
             while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
@@ -788,6 +802,10 @@ ast_create_expr_prec(
                 current_token->tt == TK_COMMA) {
                 break;
             }
+            // if (is_args && current_token->tt == TK_PAREN_CLOSE) {
+            //     (*i)++; // Throw away closed bracket
+            //     break;
+            // } 
         }
     }
     //print_node(lhs, 0);
@@ -834,10 +852,14 @@ StatementNode* ast_create_if(std::vector<Token*> tokens, int* i) {
     IfNode* if_node = new IfNode;
     Token* current_token = next_token(tokens, i); // skip if token
     ExpressionNode* cond = ast_create_expression(tokens, false, true, i);
-    //BlockNode* block = ast_create_block(tokens, i);
+    std::cout << "AST_IFS\n";
+    print_token(tokens[*i]);
+    (*i)++;
+    BlockNode* block = ast_create_block(tokens, i);
 
+    if_node->nt = NODE_IF;
     if_node->condition = cond;
-    if_node->block = NULL;
+    if_node->block = block;
     ret->if_lhs = if_node;
     return ret;
 }
@@ -867,14 +889,13 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             expect(current_token, TK_ASSIGN);
             current_token = next_token(tokens, i);
             ExpressionNode* rhs = ast_create_expression(tokens, false, false, i);
-            VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), id, rhs);
+            VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
             //print_node(expr, 0);
             StatementNode* statement = new StatementNode;
             statement->nt = NODE_VAR_DECL;
             statement->vardecl_lhs = lhs;
             statement->expr_rhs = rhs;
             statements->push_back(statement);
-            //statement->lhs::expr = NULL;
         } else if (current_token->tt == TK_ARROW) {
             StatementNode* statement = ast_create_return(tokens, i);
             statement->nt = NODE_RETURN;
@@ -996,7 +1017,10 @@ void atlas_lib(std::ofstream* file) {
           << "typedef unsigned int uint32;\n"
           << "typedef unsigned int uint;\n"
           << "typedef long long int64;\n"
-          << "typedef unsigned long long uint64;\n";
+          << "typedef unsigned long long uint64;\n"
+          << "#define bool ushort\n"
+          << "#define true 1\n"
+          << "#define false 0\n";
 
     *file << "\n";
 
@@ -1028,14 +1052,14 @@ void atlas_lib(std::ofstream* file) {
 void codegen_init_c(std::vector<StatementNode*> ast, std::ofstream* file) {
 	*file << "void _start(void)\n"
           << "{\n"
-          << "\t\n";
-    for (StatementNode* statement : ast) {
-        if (statement->nt == NODE_FUNC) {
-            *file << "\t" << statement->func_lhs->token->token << "();\n";
-        }
-    }
+          << "\tint ret = main();\n";
+    // for (StatementNode* statement : ast) {
+    //     if (statement->nt == NODE_FUNC) {
+    //         *file << "\t" << statement->func_lhs->token->token << "();\n";
+    //     }
+    // }
 
-    *file << "\tsys_exit(0);\n"
+    *file << "\tsys_exit(ret);\n"
           << "}\n\n";
 }
 
@@ -1061,48 +1085,11 @@ void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
             *file << ")";
             break;
         case NODE_VAR:
-            *file << expression->var_node->identifier->token << " ";
+            *file << expression->var_node->identifier->token;
             break;
         default:
             std::cout << "[ERROR]: CODEGEN EXPR " << expression->nt << "\n";
             exit(1);
-    }
-}
-
-void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
-    if (var_decl->lhs->type == TYPE_I64) {
-        *file << "\tint64 " << var_decl->lhs->identifier->token;
-    }
-    if (var_decl->rhs != NULL) {
-        *file << " = ";
-        codegen_expr(var_decl->rhs, file);
-    }
-    *file << ";\n";
-}
-
-void codegen_return(StatementNode* statement, std::ofstream* file) {
-    *file << "\treturn ";
-    codegen_expr(statement->return_lhs->expr, file);
-    *file << ";\n";
-}
-
-void codegen_if(IfNode* if_node, std::ofstream* file) {
-    *file << "if(";
-    codegen_expr(if_node->condition, file);
-    *file << ")";
-    codegen_block(if_node->block, file);
-}
-
-void codegen_statement(StatementNode* statement, std::ofstream* file) {
-    switch(statement->nt) {
-        case NODE_VAR_DECL:
-            codegen_var_decl(statement->vardecl_lhs, file);
-            break;
-        case NODE_IF:
-            break;
-        case NODE_RETURN:
-            codegen_return(statement, file);
-            break;
     }
 }
 
@@ -1129,6 +1116,72 @@ std::string codegen_get_c_type(Token* atlas_type) {
     }
 }
 
+bool codegen_is_c_type(Token* atlas_type) {
+    if (atlas_type->token == "i64") {
+        return true;
+    } else if (atlas_type == NULL) {
+        return true;
+    } else if (atlas_type->token == "i32") {
+        return true;
+    } else if (atlas_type->token == "i16") {
+        return true;
+    } else if (atlas_type->token == "i8") {
+        return true;
+    } else if (atlas_type->token == "u64") {
+        return true;
+    } else if (atlas_type->token == "u32") {
+        return true;
+    } else if (atlas_type->token == "u16") {
+        return true;
+    } else if (atlas_type->token == "u8") {
+        std::cout << "[ERROR]: \"u8\" IS NOT SUPPORTED\n";
+        exit(1);
+    }
+    return false;
+}
+
+void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
+    // lhs
+    if (codegen_is_c_type(var_decl->lhs->type_)) {
+        *file << codegen_get_c_type(var_decl->lhs->type_) << " " << var_decl->lhs->identifier->token;
+    } else {
+        *file << var_decl->lhs->type_->token << var_decl->lhs->identifier->token;
+    }
+
+    // rhs
+    *file << " = ";
+    codegen_expr(var_decl->rhs, file);
+    *file << ";";
+}
+
+void codegen_return(StatementNode* statement, std::ofstream* file) {
+    *file << "return ";
+    codegen_expr(statement->return_lhs->expr, file);
+    *file << ";";
+}
+
+void codegen_if(IfNode* if_node, std::ofstream* file, int tab_level) {
+    *file << "if(";
+    codegen_expr(if_node->condition, file);
+    *file << ")\n";
+    codegen_block(if_node->block, file, tab_level + 1);
+}
+
+void codegen_statement(StatementNode* statement, std::ofstream* file, int tab_level) {
+    codegen_tabs(file, tab_level);
+    switch(statement->nt) {
+        case NODE_VAR_DECL:
+            codegen_var_decl(statement->vardecl_lhs, file);
+            break;
+        case NODE_IF:
+            codegen_if(statement->if_lhs, file, tab_level);
+            break;
+        case NODE_RETURN:
+            codegen_return(statement, file);
+            break;
+    }
+}
+
 void codegen_func(FunctionNode* func, std::ofstream* file) {
     if (func->return_types == NULL) {
         *file << "void ";
@@ -1149,17 +1202,27 @@ void codegen_func(FunctionNode* func, std::ofstream* file) {
     if (func->params.size() == 0) {
         *file << "void";
     }
-    *file << ")";
-    codegen_block(func->block, file);
+    *file << ")\n";
+    codegen_block(func->block, file, 1);
+    *file << "\n";
 }
 
-void codegen_block(BlockNode* block, std::ofstream* file) {
-    *file << "\n{\n";
+void codegen_tabs(std::ofstream* file, int tab_level) {
+    for (int i = 0; i < tab_level; i++) {
+        *file << "\t";
+    }
+}
+
+void codegen_block(BlockNode* block, std::ofstream* file, int tab_level) {
+    codegen_tabs(file, tab_level - 1);
+    *file << "{\n";
     if (block != NULL) {
         for (StatementNode* statement : *(block->statements)) {
-            codegen_statement(statement, file);
+            codegen_statement(statement, file, tab_level);
+            *file << "\n";
         }
     }
+    codegen_tabs(file, tab_level - 1);
     *file << "}\n";
 }
 
@@ -1168,7 +1231,7 @@ void codegen_start(std::vector<StatementNode*> ast, std::string filename) {
     atlas_lib(&file);
     std::cout << "Ast size: " << ast.size() << "\n";
     for (StatementNode* node : ast) {
-        std::cout << "KEK: " <<  node->nt << "\n";
+        std::cout << "Generating Node: " <<  node->nt << "\n";
         if (node->nt == NODE_FUNC) {
             codegen_func(node->func_lhs, &file);
         }  
