@@ -208,6 +208,7 @@ ExpressionNode* ast_create_expr_prec(std::vector<Token*> tokens, int precedence,
 void codegen_block(BlockNode* block, std::ofstream* file, int tab_level);
 BlockNode* ast_create_block(std::vector<Token*> tokens, int* i);
 void codegen_tabs(std::ofstream* file, int tab_level);
+bool codegen_statement(StatementNode* statement, std::ofstream* file, int tab_level);
 
 const char* get_tt_str(TokenType tt) {
     if (tt == TK_NEWLINE) {
@@ -514,7 +515,8 @@ std::vector<Token*> tokenize (std::string src) {
 void expect(Token* token, TokenType expected) {
     if (token->tt != expected) {
         std::cout << expected;
-        std::cout << "Error: Expected: \"" << get_tt_str(expected) 
+        std::cout << CL_RED << "[Error]:" << CL_RESET
+        << " Expected: \"" << get_tt_str(expected) 
         << "\"... Got: " << get_tt_str(token->tt) << " == ";
         print_token(token);
         exit(1);
@@ -888,12 +890,11 @@ StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
     StatementNode* ret = new StatementNode;
     ForNode* for_node = new ForNode;
 
-    std::cout << "FOR IS NOT SUPPORTED\n";
-    exit(50);
     Token* current_token = next_token(tokens, i); // skip for
     //TODO: make it more generic for other types of statements
     // init statement
     // for now assuming its a var_decl but need to fix this later
+    StatementNode* init_statement = new StatementNode;
     Token* type = current_token;
     current_token = next_token(tokens, i);
     expect(current_token, TK_DOUBLE_C);
@@ -905,18 +906,43 @@ StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
     current_token = next_token(tokens, i);
     ExpressionNode* rhs = ast_create_expression(tokens, false, false, i);
     VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
-    StatementNode* init_statement = new StatementNode;
     init_statement->nt = NODE_VAR_DECL;
     init_statement->vardecl_lhs = lhs;
     init_statement->expr_rhs = rhs;
     for_node->init = init_statement;
+
     // test expression
     current_token = next_token(tokens, i);
     expect(current_token, TK_NEWLINE);
+    current_token = next_token(tokens, i); // skip NEWLINE
     ExpressionNode* test_expr = ast_create_expression(tokens, false, false, i);
-    expect(current_token, TK_NEWLINE);
-    // update statement
     current_token = next_token(tokens, i);
+    expect(current_token, TK_NEWLINE);
+    for_node->test = test_expr;
+
+    // update statement
+    current_token = next_token(tokens, i); // skip NEWLINE
+    StatementNode* update_statement = new StatementNode;
+    Token* var = current_token;
+    VarNode* var_node = ast_create_var(var);
+    current_token = next_token(tokens, i); 
+    current_token = next_token(tokens, i); // skip =
+    ExpressionNode* expr_rhs = ast_create_expression(tokens, false, false, i);
+    AssignNode* assign = new AssignNode;
+    assign->lhs = var_node;
+    assign->rhs = expr_rhs;
+    update_statement->nt = NODE_ASSIGN;
+    update_statement->assign_lhs = assign;
+    for_node->update = update_statement;
+
+    // block
+    current_token = next_token(tokens, i);
+    expect(current_token, TK_CURLY_OPEN);
+    BlockNode* for_block = ast_create_block(tokens, i);
+    for_node->block = for_block;
+
+    ret->for_lhs = for_node;
+    return ret;
 }
 
 StatementNode* ast_create_if(std::vector<Token*> tokens, int* i) {
@@ -1009,7 +1035,6 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             StatementNode* statement = ast_create_for(tokens, i);
             statement->nt = NODE_FOR;
             statements->push_back(statement);
-            exit(50);
         }
     }
     block->statements = statements;
@@ -1212,13 +1237,11 @@ void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
     // rhs
     *file << " = ";
     codegen_expr(var_decl->rhs, file);
-    *file << ";";
 }
 
 void codegen_return(StatementNode* statement, std::ofstream* file) {
     *file << "return ";
     codegen_expr(statement->return_lhs->expr, file);
-    *file << ";";
 }
 
 void codegen_if(IfNode* if_node, std::ofstream* file, int tab_level) {
@@ -1239,30 +1262,42 @@ void codegen_if(IfNode* if_node, std::ofstream* file, int tab_level) {
     }
 }
 
+void codegen_for(ForNode* for_node, std::ofstream* file, int tab_level) {
+    *file << "for(";
+    codegen_statement(for_node->init, file, tab_level);
+    *file << "; ";
+    codegen_expr(for_node->test, file);
+    *file << "; ";
+    codegen_statement(for_node->update, file, tab_level);
+    *file << ")\n";
+    codegen_block(for_node->block, file, tab_level + 1);
+}
+
 void codegen_assign(AssignNode* assign, std::ofstream* file) {
     // lhs
     *file << assign->lhs->identifier->token;
     // rhs
     *file << " = ";
     codegen_expr(assign->rhs, file);
-    *file << ";";
 }
 
-void codegen_statement(StatementNode* statement, std::ofstream* file, int tab_level) {
-    codegen_tabs(file, tab_level);
+bool codegen_statement(StatementNode* statement, std::ofstream* file, int tab_level) {
     switch(statement->nt) {
         case NODE_VAR_DECL:
             codegen_var_decl(statement->vardecl_lhs, file);
-            break;
+            return true;
         case NODE_ASSIGN:
             codegen_assign(statement->assign_lhs, file);
-            break;
+            return true;
         case NODE_IF:
             codegen_if(statement->if_lhs, file, tab_level);
-            break;
+            return false;
         case NODE_RETURN:
             codegen_return(statement, file);
-            break;
+            return true;
+        case NODE_FOR:
+            codegen_for(statement->for_lhs, file, tab_level);
+            return false;
     }
 }
 
@@ -1302,8 +1337,10 @@ void codegen_block(BlockNode* block, std::ofstream* file, int tab_level) {
     *file << "{\n";
     if (block != NULL) {
         for (StatementNode* statement : *(block->statements)) {
-            codegen_statement(statement, file, tab_level);
-            *file << "\n";
+            codegen_tabs(file, tab_level);
+            if(codegen_statement(statement, file, tab_level)) {
+                *file << ";\n";
+            }
         }
     }
     codegen_tabs(file, tab_level - 1);
