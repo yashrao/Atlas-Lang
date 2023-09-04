@@ -945,9 +945,6 @@ ast_create_expr_prec(
             }
         }
     }
-    if (is_arr && current_token->tt != TK_SQUARE_CLOSE) {
-        (*i)++;
-    }
     //print_node(lhs, 0);
     return lhs;
 }
