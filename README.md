@@ -2,40 +2,8 @@
 **P.S. Name may not be final - but it is Atlas for now**
 Atlas is aimed to be a statically typed compiled language and is aimed to be very similar to C (in-fact it compiles to C). This is being made as a learning exercise and is currently under development.
 
-The Compiler has just started development so it doesn't do anything as of yet:
-- [X] Parser 
-- [ ] AST Generation
-  - [ ] Handle characters and strings
-  - [ ] Function Nodes
-    - [X] Parameters
-    - [X] Single Return Types
-    - [ ] Multiple Return Types
-    - [X] Block
-  - [X] Block Nodes
-  - [X] Variable Nodes
-  - [X] Variable Declaration Nodes
-  - [X] Assignment Nodes
-  - [X] Call Nodes
-    - [X] Arguments
-- [ ] Type Checking
-- [ ] Type inference
-- [ ] Codegen (C)
-  - [ ] Constants
-  - [X] Variable Declaration
-  - [X] Function Declaration
-  - [X] Assignments
-  - [X] Return
-  - [X] If Statements
-  - [X] For Loops
-  - [ ] Completely Working Expressions
-  - [ ] Implement stdlib
-    - [X] putchar
-    - [ ] malloc
-    - [ ] free
-- **Note:** if the option is ticked, it means that it is working but doesn't necessarily mean it is complete from a functionality POV 
-
 ## Planned Design
-Below are some sample programs that have been written to encapsulate what kind of syntax Atlas will have with a full set of features:
+Below are some sample programs that have been written to encapsulate what kind of syntax Atlas will have with a full set of features (Note: this is just a proof of concept, see below for what works currently):
 
 ```Rust
 // variable.atl
@@ -94,3 +62,36 @@ main() -> i64 {
     -> sum
 }
 ```
+
+## TODO
+The Compiler has just started development so it doesn't do much:
+- [X] Parser 
+- [ ] AST Generation
+  - [ ] Handle characters and strings
+  - [ ] Function Nodes
+    - [X] Parameters
+    - [X] Single Return Types
+    - [ ] Multiple Return Types
+    - [X] Block
+  - [X] Block Nodes
+  - [X] Variable Nodes
+  - [X] Variable Declaration Nodes
+  - [X] Assignment Nodes
+  - [X] Call Nodes
+    - [X] Arguments
+- [ ] Type Checking
+- [ ] Type inference
+- [ ] Codegen (C)
+  - [ ] Constants
+  - [X] Variable Declaration
+  - [X] Function Declaration
+  - [X] Assignments
+  - [X] Return
+  - [X] If Statements
+  - [X] For Loops
+  - [ ] Completely Working Expressions
+  - [ ] Implement stdlib
+    - [X] putchar
+    - [ ] malloc
+    - [ ] free
+- **Note:** if the option is ticked, it means that it is working but doesn't necessarily mean it is complete from a functionality POV 
