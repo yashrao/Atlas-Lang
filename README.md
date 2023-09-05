@@ -54,9 +54,9 @@ main() -> i64 {
     i64 :: sum = 0
     for i64::i = 0; i < 10; i = i + 1 {
         if i % 3 == 0 {
-	        sum = sum + i
-	    } else if i % 5 == 0 {
-	        sum = sum + i
+	    sum = sum + i
+	} else if i % 5 == 0 {
+            sum = sum + i
         }
     }
     -> sum
