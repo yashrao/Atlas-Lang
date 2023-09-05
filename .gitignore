@@ -5,3 +5,7 @@ atlas
 module*
 *.c
 out
+.vs/*
+.vscode/*
+*.pdb
+*.lib
