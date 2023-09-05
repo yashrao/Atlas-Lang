@@ -1,0 +1,7 @@
+.ccls-cache/*
+*.o
+atlas
+*.ll
+module*
+*.c
+out
