@@ -54,7 +54,8 @@ enum TokenType {
     TK_IF,
     TK_ELSE,
     TK_FOR,
-    TK_TYPE
+    TK_TYPE,
+    TK_PERCENT
 };
 
 struct Token {
@@ -296,6 +297,8 @@ const char* get_tt_str(TokenType tt) {
         return "TK_FOR";
     } else if (tt == TK_TYPE) {
         return "TK_TYPE";
+    } else if (tt == TK_PERCENT) {
+        return "TK_PERCENT";
     } else {
         return "TK_INVALID";
     }
@@ -404,6 +407,8 @@ TokenType get_tt(char c) {
         return TK_SQUARE_CLOSE;
     } else if (c == '=') {
         return TK_ASSIGN;
+    } else if (c == '%') {
+        return TK_PERCENT;
     }
 
     return TK_INVALID;
@@ -510,7 +515,7 @@ std::vector<Token*> tokenize (std::string src) {
                 line++;
             } else if (c == '+' || c == '(' || c == ')' || c == '*' ||
                        c == '{' || c == '}' || c == '=' || c == '[' ||
-                       c == ']' || c == ',') {
+                       c == ']' || c == ',' || c == '%') {
                 if (c == '=' && lookahead == '=') {
                     i += 1;
                     ret.push_back(save_token(line, column, TK_EQUAL, "=="));
@@ -798,9 +803,12 @@ ExpressionNode* ast_create_constant(Token* constant_value) {
 int get_prec(TokenType tt) {
     switch(tt) {
     case TK_PAREN_OPEN:
+        return 6;
+    case TK_SQUARE_OPEN:
         return 5;
     case TK_STAR:
     case TK_SLASH:
+    case TK_PERCENT:
         return 4;
     case TK_PLUS:
     case TK_DASH:
@@ -832,7 +840,7 @@ Token* ast_get_lookahead(std::vector<Token*> tokens, int* i) {
     }
 }
 
-ExpressionNode* ast_create_array_expr(std::vector<Token*> tokens, int* i) {
+ExpressionNode* ast_create_array_decl(std::vector<Token*> tokens, int* i) {
     ExpressionNode* ret = new ExpressionNode;
     ArrayNode* arr = new ArrayNode;
     Token* current_token = next_token(tokens, i); // get the next token
@@ -857,6 +865,8 @@ ExpressionNode* ast_create_array_expr(std::vector<Token*> tokens, int* i) {
     expect(current_token, TK_SQUARE_CLOSE);
     ret->array = arr;
     ret->nt = NODE_ARRAY_EXPR;
+    Token* lookahead = ast_get_lookahead(tokens, i);
+    expect(lookahead, TK_NEWLINE);
 
     return ret;
 }
@@ -880,7 +890,7 @@ ast_create_expr_prec(
     } else if (current_token->tt == TK_CONSTANT) {
         lhs = ast_create_constant(tokens[*i]);
     } else if (current_token->tt == TK_SQUARE_OPEN) {
-        lhs = ast_create_array_expr(tokens, i);
+        lhs = ast_create_array_decl(tokens, i);
     }
     //operator is the lookahead
     ExpressionNode* rhs = NULL;
@@ -915,6 +925,8 @@ ast_create_expr_prec(
             } else if (current_token->tt == TK_CONSTANT) {
                 // Constant TODO: handle quotes 
                 rhs = ast_create_constant(tokens[*i]);
+            } else if (NULL) {
+                //TODO: add unary operator here e.g. []
             } else {
                 return lhs;
             }
@@ -925,10 +937,8 @@ ast_create_expr_prec(
             // print_token(lookahead);
             while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
                 if (get_prec(lookahead->tt) > get_prec(op->tt))
-                    //rhs = ast_create_expr_prec(tokens, get_prec(op->tt) + 1, false, false, false i);
                     rhs = ast_create_expr_prec(tokens, get_prec(op->tt) + 1, is_args, is_cond, is_arr, i);
                 else
-                    //rhs = ast_create_expr_prec(tokens, get_prec(op->tt), false, false, false, i);
                     rhs = ast_create_expr_prec(tokens, get_prec(op->tt), is_args, is_cond, is_arr, i);
                 current_token = next_token(tokens, i);
                 if (current_token->tt == TK_NEWLINE || current_token->tt == TK_COMMA) {
@@ -1129,6 +1139,15 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
                 statement->nt = NODE_ASSIGN;
                 statement->assign_lhs = assign;
                 statements->push_back(statement);
+            } else if (current_token->tt == TK_PAREN_OPEN) {
+                (*i)--;
+                current_token = tokens[*i];
+                StatementNode* statement = new StatementNode;
+                ExpressionNode* expr = ast_create_expression(tokens, false, false, false, i);
+                statement->expr_lhs = expr;
+                statement->nt = expr->nt;
+                std::cout << get_nt_str(statement->nt);
+                statements->push_back(statement);
             }
         } else if (current_token->tt == TK_ARROW) {
             StatementNode* statement = ast_create_return(tokens, i);
@@ -1142,7 +1161,7 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             StatementNode* statement = ast_create_for(tokens, i);
             statement->nt = NODE_FOR;
             statements->push_back(statement);
-        }
+        }  
     }
     block->statements = statements;
     return block;
@@ -1243,7 +1262,8 @@ void atlas_lib(std::ofstream* file) {
           << "#define bool ushort\n"
           << "#define true 1\n"
           << "#define false 0\n"
-          << "#define NULL 0\n";
+          << "#define NULL 0\n"
+          << "#define putchar atlas_putchar\n";
 
     *file << "#define MEMORY_POOL_SIZE 690000\n"
           << "static uint allocated_size = 0;\n"
@@ -1260,7 +1280,8 @@ void atlas_lib(std::ofstream* file) {
           << "    void* ptr = &memory_pool[allocated_size];\n"
           << "    allocated_size += size;\n"
           << "    return ptr;\n"
-          << "}\n"
+          << "}\n\n"
+
           << "void atlas_free(void* ptr) {\n"
           << "    if (ptr == NULL) {\n"
           << "        return;\n"
@@ -1272,41 +1293,35 @@ void atlas_lib(std::ofstream* file) {
 
     *file << "\n";
 
-    *file << "void sys_exit(int error_code)\n"
+    *file << "void sys_exit(int exit_code)\n"
           << "{\n"
           << "\tasm volatile\n"
           << "\t(\n"
           << "\t\t\"syscall\"\n"
           << "\t\t:\n" 
-          << "\t\t: \"a\"(SYSCALL_EXIT), \"D\"(error_code)\n"
+          << "\t\t: \"a\"(SYSCALL_EXIT), \"D\"(exit_code)\n"
           << "\t\t: \"rcx\", \"r11\", \"memory\"\n"
           << "\t);\n"
           << "}\n\n";
 
-	*file << "int sys_write(unsigned fd, const char* buf, unsigned count)\n"
-          << "{\n"
-          << "\tunsigned ret;\n"
-          << "\tasm volatile\n"
-          << "\t(\n"
+    *file << "void atlas_putchar(char c) {\n"
+          << "\tasm volatile (\n"
+          << "\t\t\"movq $1, %%rax\\n\"\n"
+          << "\t\t\"movq $1, %%rdi\\n\"\n"
+          << "\t\t\"movq %0, %%rsi\\n\"\n"
+          << "\t\t\"movq $1, %%rdx\\n\"\n"
           << "\t\t\"syscall\"\n"
-          << "\t\t: \"=a\"(ret)\n"
-          << "\t\t: \"a\"(SYSCALL_WRITE), \"D\"(fd), \"S\"(buf), \"d\"(count)\n"
-          << "\t\t: \"rcx\", \"r11\", \"memory\"\n"
+          << "\t\t:\n"
+          << "\t\t: \"r\"(&c)\n"
+          << "\t\t: \"%rax\", \"%rdi\", \"%rsi\", \"%rdx\"\n"
           << "\t);\n"
-          << "\treturn ret;\n"
           << "}\n\n";
-
 }
 
 void codegen_init_c(std::vector<StatementNode*> ast, std::ofstream* file) {
 	*file << "void _start(void)\n"
           << "{\n"
           << "\tint ret = main();\n";
-    // for (StatementNode* statement : ast) {
-    //     if (statement->nt == NODE_FUNC) {
-    //         *file << "\t" << statement->func_lhs->token->token << "();\n";
-    //     }
-    // }
 
     *file << "\tsys_exit(ret);\n"
           << "}\n\n";
@@ -1515,6 +1530,9 @@ bool codegen_statement(StatementNode* statement, std::ofstream* file, int tab_le
         case NODE_FOR:
             codegen_for(statement->for_lhs, file, tab_level);
             return false;
+        case NODE_CALL:
+            codegen_expr(statement->expr_lhs, file);
+            return true;
     }
     return false;
 }
@@ -1575,6 +1593,8 @@ void codegen_start(std::vector<StatementNode*> ast, std::string filename, std::s
             codegen_func(node->func_lhs, &file);
         } else if (node->nt == NODE_TYPE) {
             codegen_type(node->type_lhs, &file);
+        } else if (node->nt == NODE_CALL) {
+            codegen_expr(node->expr_lhs, &file);
         }
     }
     codegen_init_c(ast, &file);
