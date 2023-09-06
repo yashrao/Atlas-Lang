@@ -9,3 +9,6 @@ out
 .vscode/*
 *.pdb
 *.lib
+*.out
+test/*.txt
+test/euler/*.txt

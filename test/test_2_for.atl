@@ -1,0 +1,12 @@
+include "std.atl"
+
+// Testing for loop functionality
+main() -> i64 {
+    i64 :: sum = 0
+    for i64::i = 0; i < 10; i = i + 1 {
+        sum = sum + 1
+    }
+    putint(sum)
+
+    -> 0
+}

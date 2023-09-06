@@ -4,9 +4,11 @@
 #include <vector>
 #include <cctype>
 #include <cstring>
+#include <unistd.h>
 
 // debug
 #include <memory>
+
 
 // Colors
 const char* CL_BLACK   = "\e[0;30m";
@@ -18,6 +20,14 @@ const char* CL_MAGENTA = "\e[0;35m";
 const char* CL_CYAN    = "\e[0;36m";
 const char* CL_WHITE   = "\e[0;37m";
 const char* CL_RESET   = "\e[0m";
+
+typedef struct State {
+    bool debug;
+    std::string output_file_path;
+    std::string input_file_dir;
+    std::string input_filename;
+    std::string include_path;
+} State;
 
 enum TokenType {
     TK_NEWLINE = 100,
@@ -55,7 +65,9 @@ enum TokenType {
     TK_ELSE,
     TK_FOR,
     TK_TYPE,
-    TK_PERCENT
+    TK_PERCENT,
+    TK_CHAR,
+    TK_INCLUDE 
 };
 
 struct Token {
@@ -98,6 +110,7 @@ enum NodeType {
     NODE_FOR,
     NODE_TYPE,
     NODE_ARRAY_EXPR,
+    NODE_CHAR
 };
 
 struct Node {
@@ -139,11 +152,15 @@ struct BinaryOpNode : Node {
 };
 
 struct UnaryOpNode : Node {
-
+    //TODO: look to move certain things to here
 };
 
 struct ConstantNode : Node {
     int value;
+};
+
+struct CharacterNode : Node {
+    std::string value;
 };
 
 struct ArrayNode : Node {
@@ -154,6 +171,7 @@ struct ExpressionNode : Node {
     union {
         BinaryOpNode* binop;
         ConstantNode* constant;
+        CharacterNode* character;
         UnaryOpNode* unary_op;
         VarNode* var_node;
         CallNode* call_node;
@@ -227,6 +245,9 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i);
 void codegen_tabs(std::ofstream* file, int tab_level);
 bool codegen_statement(StatementNode* statement, std::ofstream* file, int tab_level);
 void codegen_expr(ExpressionNode* expression, std::ofstream* file);
+std::string read_file (std::string filename);
+
+static State* global_state = NULL;
 
 const char* get_tt_str(TokenType tt) {
     if (tt == TK_NEWLINE) {
@@ -299,6 +320,10 @@ const char* get_tt_str(TokenType tt) {
         return "TK_TYPE";
     } else if (tt == TK_PERCENT) {
         return "TK_PERCENT";
+    } else if (tt == TK_CHAR) {
+        return "TK_CHAR";
+    } else if (tt == TK_INCLUDE) {
+        return "TK_INCLUDE";
     } else {
         return "TK_INVALID";
     }
@@ -336,25 +361,37 @@ std::string get_nt_str(NodeType nt) {
         return "NODE_TYPE";
     case NODE_ARRAY_EXPR:
         return "NODE_ARRAY_EXPR";
+    case NODE_CHAR:
+        return "NODE_CHAR";
     default:
         return "NODE_INVALID";
     }
 }
 
-
-void print_token(Token* token) {
-    std::cout << "TOKEN" << "<" << get_tt_str(token->tt) << "> " 
-        << "(" << token->line << "," << token->column << ")" 
-        << ": " << token->token << "\n";
+void log_print(std::string message) {
+    if(global_state->debug) {
+        std::cout << "[INFO]: " + message;
+    }
 }
 
-void print_error_msg(const char* error) {
+void print_token(Token* token) {
+    if (global_state->debug) {
+        std::string message = std::string("") + "TOKEN" + "<" + std::string(get_tt_str(token->tt)) + "> " 
+            + "(" + std::to_string(token->line) + "," + std::to_string(token->column) + ")" 
+            + ": " + token->token + "\n";
+        log_print(message);
+    }
+}
+
+void print_error_msg(std::string error) {
     std::cout << CL_RED << "[COMPILER ERROR]: " << CL_RESET << error << "\n";
 }
 
 void print_tokens (std::vector<Token*> tokens) {
-    for (Token* token : tokens) {
-        print_token(token);
+    if (global_state->debug) {
+        for (Token* token : tokens) {
+            print_token(token);
+        }
     }
 }
 
@@ -409,14 +446,21 @@ TokenType get_tt(char c) {
         return TK_ASSIGN;
     } else if (c == '%') {
         return TK_PERCENT;
+    } else if (c == '\'') {
+        return TK_CHAR;
     }
 
     return TK_INVALID;
 }
 
-std::string read_file (const char* filename) {
+std::string read_file (std::string filename) {
     std::ifstream file;
     file.open(filename);
+    if(file.fail()) {
+        std::string err = "File \"" + std::string(filename) + "\" could not be opened";
+        print_error_msg(err);
+        exit(1);
+    }
     std::string ret;
     while(file.good()) {
         ret += file.get();
@@ -461,6 +505,8 @@ TokenType tokenize_get_reserved_word(std::string word) {
         return TK_FOR;
     } else if (word == "type") {
         return TK_TYPE;    
+    } else if (word == "include") {
+        return TK_INCLUDE;
     } else {
         return TK_IDENTIFIER;
     }
@@ -484,7 +530,16 @@ std::vector<Token*> tokenize (std::string src) {
         column++;
         if (c == ' ' && lookahead == ' ') {
             continue;
-        } 
+        } else if (c == '/') {
+                if (lookahead == '/') {
+                    while (c != '\n') {
+                        i++;
+                        c = src[i];
+                    }
+                    column = 0;
+                    line++;
+                }
+        }
         if (isalnum(c)) {
             current_token_string += c;
             prev_delim = false;
@@ -515,13 +570,42 @@ std::vector<Token*> tokenize (std::string src) {
                 line++;
             } else if (c == '+' || c == '(' || c == ')' || c == '*' ||
                        c == '{' || c == '}' || c == '=' || c == '[' ||
-                       c == ']' || c == ',' || c == '%') {
+                       c == ']' || c == ',' || c == '%' || c == '/') {
                 if (c == '=' && lookahead == '=') {
                     i += 1;
                     ret.push_back(save_token(line, column, TK_EQUAL, "=="));
                 } else {
                     ret.push_back(save_token(line, column, get_tt(c), std::string(1, c)));
                 }
+            } else if (c == '\'') {
+                //TODO: escape sequences
+                std::string character = "";
+                int start = column;
+                i += 1;
+                column += 1;
+                c = src[i];
+                while(c != '\'') {
+                    character += c;
+                    i += 1;
+                    column += 1;
+                    c = src[i];
+                }
+                ret.push_back(save_token(line, start, TK_CHAR, character));
+            } else if (c == '"') {
+                //TODO: escape sequences
+                std::string str = "";
+                int start = column;
+                i += 1;
+                column += 1;
+                c = src[i];
+                while(c != '"') {
+                    str += c;
+                    i += 1;
+                    column += 1;
+                    c = src[i];
+                }
+                ret.push_back(save_token(line, start, TK_QUOTE, str));
+
             } else if (c == ':') {
                 if (lookahead == ':') {
                     i += 1;
@@ -562,16 +646,7 @@ std::vector<Token*> tokenize (std::string src) {
                 } else {
                     ret.push_back(save_token(line, column, TK_LT, ">"));
                 }
-            } else if (c == '/') {
-                if (lookahead == '/') {
-                    while (c != '\n') {
-                        i++;
-                        c = src[i];
-                    }
-                    column = 0;
-                    line++;
-                }
-            }
+            } 
         }  
     }
 
@@ -581,10 +656,9 @@ std::vector<Token*> tokenize (std::string src) {
 void expect(Token* token, TokenType expected) {
     if (token->tt != expected) {
         //std::cout << expected;
-        std::cout << CL_RED << "[Error]:" << CL_RESET
-        << " Expected: \"" << get_tt_str(expected) 
-        << "\"\n         Got: ";
-        print_token(token);
+        std::string err = " Expected: \"" + std::string(get_tt_str(expected))
+        + "\"\n         Got: " + token->token;
+        print_error_msg(err);
         exit(1);
     }
 }
@@ -722,6 +796,7 @@ ExpressionNode* ast_create_binop(ExpressionNode* lhs, ExpressionNode* rhs, Token
 }
 
 ExpressionNode* ast_create_call(Token* name, std::vector<Token*> tokens, int* i) {
+    log_print("Creating CallNode\n");
     ExpressionNode* ret = new ExpressionNode;
     CallNode* call = new CallNode;
     std::vector<ExpressionNode*> args;
@@ -729,7 +804,10 @@ ExpressionNode* ast_create_call(Token* name, std::vector<Token*> tokens, int* i)
     (*i)++; // the index should be at the first part of the expr
     for (; *i < tokens.size(); (*i)++) {
         Token* current_token = tokens[*i];
-        if (current_token->tt == TK_PAREN_CLOSE) {
+        if (current_token->tt == TK_PAREN_CLOSE || current_token->tt == TK_NEWLINE) {
+            // if (current_token->tt == TK_PAREN_CLOSE) {
+            //     (*i)++; // get rid of bracket
+            // }
             break;
         }
         args.push_back(ast_create_expression(tokens, true, false, false, i));
@@ -759,10 +837,12 @@ VarNode* ast_create_var(Token* identifier) {
     ret->type_ = NULL;
     ret->nt = NODE_VAR;
     ret->identifier = identifier;
+    ret->is_array = false; // needs to be changed externally
     return ret;
 }
 
 VarDeclNode* ast_create_var_decl(VarType type, Token* type_id, Token* identifier, ExpressionNode* rhs) {
+    log_print("Creating Variable Declaration\n");
     VarDeclNode* ret = new VarDeclNode;
     VarNode* _node = new VarNode;
     //VariableNode* _node = calloc(1, sizeof(VariableNode));
@@ -778,6 +858,7 @@ VarDeclNode* ast_create_var_decl(VarType type, Token* type_id, Token* identifier
 }
 
 ExpressionNode* ast_create_variable_expr(VarType type, Token* identifier) {
+    log_print("Creating VariableNode\n");
     ExpressionNode* ret = new ExpressionNode;
     VarNode* _node = new VarNode;
     //VariableNode* _node = calloc(1, sizeof(VariableNode));
@@ -791,6 +872,7 @@ ExpressionNode* ast_create_variable_expr(VarType type, Token* identifier) {
 }
 
 ExpressionNode* ast_create_constant(Token* constant_value) {
+    log_print("Creating ConstantNode\n");
     ExpressionNode* ret = new ExpressionNode;
     ConstantNode* constant = new ConstantNode;
     constant->value = stoi(constant_value->token);
@@ -800,26 +882,44 @@ ExpressionNode* ast_create_constant(Token* constant_value) {
     return ret;
 }
 
+ExpressionNode* ast_create_char(Token* character) {
+    log_print("Creating CharacterNode\n");
+    ExpressionNode* ret = new ExpressionNode;
+    CharacterNode* character_node = new CharacterNode;
+    if (character->token.size() > 1) {
+        print_token(character);
+        print_error_msg("Single quotes used for more than one character");
+        exit(1);
+    }
+    character_node->value = character->token;
+
+    ret->character = character_node;
+    ret->nt = NODE_CHAR;
+    return ret;
+}
+
 int get_prec(TokenType tt) {
     switch(tt) {
     case TK_PAREN_OPEN:
-        return 6;
+        return 7;
     case TK_SQUARE_OPEN:
-        return 5;
+        return 6;
     case TK_STAR:
     case TK_SLASH:
     case TK_PERCENT:
-        return 4;
+        return 5;
     case TK_PLUS:
     case TK_DASH:
-        return 3;
+        return 4;
     case TK_GT:
     case TK_LT:
     case TK_GTE:
     case TK_LTE:
-        return 2;
+        return 3;
     case TK_EQUAL:
-        return 1;
+        return 2;
+    // case TK_ASSIGN:
+    //     return 1;
     case TK_NEWLINE:
     case TK_CURLY_OPEN:
     case TK_PAREN_CLOSE:
@@ -827,7 +927,8 @@ int get_prec(TokenType tt) {
         return -1;
     default:
         print_error_msg("Invalid Operator");
-        std::cout << "Operator: " << get_tt_str(tt) << ':' << tt << "\n";
+        std::string err = "Operator: " + std::string(get_tt_str(tt)) + "\n";
+        print_error_msg(err);
         exit(1);
     }
 }
@@ -841,6 +942,7 @@ Token* ast_get_lookahead(std::vector<Token*> tokens, int* i) {
 }
 
 ExpressionNode* ast_create_array_decl(std::vector<Token*> tokens, int* i) {
+    log_print("Creating ArrayNode\n");
     ExpressionNode* ret = new ExpressionNode;
     ArrayNode* arr = new ArrayNode;
     Token* current_token = next_token(tokens, i); // get the next token
@@ -883,6 +985,8 @@ ast_create_expr_prec(
     ExpressionNode* lhs;
     Token* current_token = tokens[*i];
     Token* lookahead = ast_get_lookahead(tokens, i);
+    print_token(current_token);
+    print_token(lookahead);
     if (current_token->tt == TK_IDENTIFIER && lookahead->tt == TK_PAREN_OPEN) {
         lhs = ast_create_call(current_token, tokens, i);
     } else if (current_token->tt == TK_IDENTIFIER) {
@@ -891,6 +995,8 @@ ast_create_expr_prec(
         lhs = ast_create_constant(tokens[*i]);
     } else if (current_token->tt == TK_SQUARE_OPEN) {
         lhs = ast_create_array_decl(tokens, i);
+    } else if (current_token->tt == TK_CHAR) {
+        lhs = ast_create_char(tokens[*i]);
     }
     //operator is the lookahead
     ExpressionNode* rhs = NULL;
@@ -901,6 +1007,10 @@ ast_create_expr_prec(
     if (is_args && current_token->tt == TK_PAREN_CLOSE) {
         (*i)++; // Throw away closed bracket
         return lhs;
+    // } else if (is_args && lookahead->tt == TK_PAREN_CLOSE) {
+    //     (*i)++; // Throw away closed bracket
+    //     (*i)++; // Throw away closed bracket
+    //     return lhs;
     } else if (is_arr && (current_token->tt == TK_SQUARE_CLOSE) || (lookahead->tt == TK_SQUARE_CLOSE)) {
         (*i)++; // Throw away closed square bracket
         return lhs;
@@ -909,10 +1019,17 @@ ast_create_expr_prec(
         return lhs;
     }
 
+    current_token = tokens[*i];  
+    lookahead = ast_get_lookahead(tokens, i);
+
+    // std::cout << "AIDS3\n";
+    // print_token(current_token);
+    // print_token(lookahead);
     if (current_token->tt != TK_NEWLINE && lookahead->tt != TK_CURLY_OPEN) {
         while(get_prec(lookahead->tt) >= precedence) {
             current_token = next_token(tokens, i);
             Token* op = current_token; // operator is a lookahead
+            print_token(op);
             current_token = next_token(tokens, i); // rhs
             lookahead = ast_get_lookahead(tokens, i);
             if (current_token->tt == TK_IDENTIFIER
@@ -927,14 +1044,14 @@ ast_create_expr_prec(
                 rhs = ast_create_constant(tokens[*i]);
             } else if (NULL) {
                 //TODO: add unary operator here e.g. []
+            // } else if (current_token->tt == TK_CHAR) {
+            //     rhs = ast_create_char(tokens[*i]);
             } else {
                 return lhs;
             }
             lookahead = ast_get_lookahead(tokens, i);
             // TODO: handle left associativity
             // TODO: MIGHT BE FAILING HERE FOR ARRAY EXPR 
-            // std::cout << "LOOKAHEAD\n";
-            // print_token(lookahead);
             while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
                 if (get_prec(lookahead->tt) > get_prec(op->tt))
                     rhs = ast_create_expr_prec(tokens, get_prec(op->tt) + 1, is_args, is_cond, is_arr, i);
@@ -960,6 +1077,7 @@ ast_create_expr_prec(
 }
 
 ExpressionNode* ast_create_expression(std::vector<Token*> tokens, bool is_args, bool is_cond, bool is_arr, int* i) {
+    log_print("Creating ExpressionNode\n");
     return ast_create_expr_prec(tokens, 0, is_args, is_cond, is_arr, i);
 }
 
@@ -995,6 +1113,7 @@ VarType get_var_type(Token* var_type) {
 }
 
 StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
+    log_print("Creating ForNode\n");
     StatementNode* ret = new StatementNode;
     ForNode* for_node = new ForNode;
 
@@ -1014,11 +1133,13 @@ StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
     current_token = next_token(tokens, i);
     ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
     VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
+    lhs->lhs->is_array = false;
     init_statement->nt = NODE_VAR_DECL;
     init_statement->vardecl_lhs = lhs;
     init_statement->expr_rhs = rhs;
     for_node->init = init_statement;
 
+    //TODO: skip test expression case
     // test expression
     current_token = next_token(tokens, i);
     expect(current_token, TK_NEWLINE);
@@ -1054,6 +1175,7 @@ StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
 }
 
 StatementNode* ast_create_if(std::vector<Token*> tokens, int* i) {
+    log_print("Creating IfNode\n");
     StatementNode* ret = new StatementNode;
     IfNode* if_node = new IfNode;
     if_node->_else = NULL;
@@ -1085,6 +1207,7 @@ StatementNode* ast_create_if(std::vector<Token*> tokens, int* i) {
 }
 
 BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
+    log_print("Creating BlockNode\n");
     std::vector<StatementNode*>* statements = new std::vector<StatementNode*>;
     BlockNode* block = new BlockNode;
     block->nt = NODE_BLOCK;
@@ -1146,7 +1269,6 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
                 ExpressionNode* expr = ast_create_expression(tokens, false, false, false, i);
                 statement->expr_lhs = expr;
                 statement->nt = expr->nt;
-                std::cout << get_nt_str(statement->nt);
                 statements->push_back(statement);
             }
         } else if (current_token->tt == TK_ARROW) {
@@ -1167,7 +1289,18 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
     return block;
 }
 
+std::string ast_get_file_full_path(std::string filename) {
+    int last_slash_idx = filename.rfind('/');
+    std::string directory;
+    if (std::string::npos != last_slash_idx)
+    {
+        directory = filename.substr(0, last_slash_idx);
+    }
+    return directory + '/';
+}
+
 std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
+    log_print("Running ast_create\n");
     std::vector<StatementNode*> ret;
     bool is_block = false;
     for (int i = 0; i < tokens.size(); i++) {
@@ -1239,6 +1372,19 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
                 statement->type_lhs = type_node;
                 statement->nt = NODE_TYPE;
                 ret.push_back(statement);
+            } else if (tt == TK_INCLUDE) {
+                current_token = next_token(tokens, &i);
+                std::string filename = current_token->token;
+                if (global_state->include_path.size() != 0) {
+                    filename = global_state->include_path + filename;
+                } else {
+                    std::string dir = ast_get_file_full_path(global_state->input_filename);
+                    filename = global_state->input_file_dir + dir + filename;
+                }
+                std::string src = read_file(filename.c_str());
+                auto tokens = tokenize(src);
+                auto ast = ast_create(tokens);
+                ret.insert(ret.end(), ast.begin(), ast.end());
             }
         }
     }
@@ -1330,31 +1476,55 @@ void codegen_init_c(std::vector<StatementNode*> ast, std::ofstream* file) {
 void codegen_end(std::ofstream* file, std::string backend) {
     (*file).close();
 
-    std::string command = backend + " -nostdlib out.c -o out";
-    std::cout << "[COMPILER]: Running \"" << command << "\"\n";
+    std::string output_file_path;
+    if(global_state->output_file_path.size() != 0) {
+        output_file_path = global_state->output_file_path;
+    } else {
+        output_file_path = "a.out";
+    }
+
+    std::string command = backend + " -nostdlib out.c -o" + output_file_path;
+    log_print("Running \"" + command + "\"\n");
     // Compile C code
     int ret = std::system(command.c_str());
     //TODO: not sure what scenarios this works/not works
-    if (WEXITSTATUS(ret) != 0x10) {
+    if (WEXITSTATUS(ret) != 0x00) {
         std::string err = backend + " backend Failed to compile C program";
         print_error_msg(err.c_str());
-        std::cout << "                  Check " << backend << " error messages";
+        std::cout << "                  Check " << backend << " error messages\n";
+        std::cout << "                  Exit Code: " << ret << "\n";
         exit(1);
     }
-    std::cout << "Generated binary \"out\"\n";
+    log_print("Generated binary \"" + output_file_path + "\"\n");
 }
 
 void codegen_array_expr(ArrayNode* array, std::ofstream* file) {
     *file << "{";
     for (int i = 0; i < array->elements.size(); i++) {
-        std::cout << array->elements[i] << ": ";
-        std::cout << get_nt_str(array->elements[i]->nt) << "\n";
+        //std::cout << array->elements[i] << ": ";
+        //std::cout << get_nt_str(array->elements[i]->nt) << "\n";
         codegen_expr(array->elements[i], file);
         if (i != array->elements.size() - 1) {
             *file << ", ";
         }
     }
     *file << "}";
+}
+
+bool codegen_is_intrinsic_function(std::string call_name) {
+    if (call_name == "putchar") {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+void codegen_char(CharacterNode* character, std::ofstream* file) {
+    *file << "'";
+    if (character->value.size() != 0) {
+        *file << character->value;
+    }
+    *file << "'";
 }
 
 void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
@@ -1368,21 +1538,31 @@ void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
             *file << expression->constant->value;
             break;
         case NODE_CALL:
-            *file << expression->call_node->name->token << "("; 
+        {
+            std::string call_name = expression->call_node->name->token;
+            if (codegen_is_intrinsic_function(call_name)) {
+                *file << "atlas_" << expression->call_node->name->token << "("; 
+            } else {
+                *file << expression->call_node->name->token << "("; 
+            }
             for (auto arg : expression->call_node->args) {
                 codegen_expr(arg, file);
             }
             *file << ")";
             break;
+        }
         case NODE_VAR:
             *file << expression->var_node->identifier->token;
             break;
         case NODE_ARRAY_EXPR:
             codegen_array_expr(expression->array, file);
             break;
+        case NODE_CHAR:
+            codegen_char(expression->character, file);
+            break;
         default:
             std::string err = "CODEGEN EXPR " + get_nt_str(expression->nt) + "\n";
-            print_error_msg(err.c_str());
+            print_error_msg(err);
             std::cout << expression->nt;
             exit(1);
     }
@@ -1410,7 +1590,8 @@ std::string codegen_get_c_type(Token* atlas_type) {
         //print_error_msg("\"u8\" IS NOT SUPPORTED");
         //exit(1);
     }
-    print_error_msg("This type is not supported");
+    std::string err = "The \"" + atlas_type->token + "\" type is not supported";
+    print_error_msg(err);
     exit(1);
 }
 
@@ -1447,6 +1628,7 @@ void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
         *file << var_decl->lhs->type_->token << var_decl->lhs->identifier->token;
     }
 
+    print_token(var_decl->lhs->identifier);
     if (var_decl->lhs->is_array == true) {
         *file << "[";
         codegen_expr(var_decl->lhs->arr_size, file);
@@ -1586,9 +1768,8 @@ void codegen_block(BlockNode* block, std::ofstream* file, int tab_level) {
 void codegen_start(std::vector<StatementNode*> ast, std::string filename, std::string backend) {
     std::ofstream file(filename);
     atlas_lib(&file);
-    std::cout << "Ast size: " << ast.size() << "\n";
     for (StatementNode* node : ast) {
-        std::cout << "Generating Node: " <<  get_nt_str(node->nt) << "\n";
+        log_print("Generating Node: " +  get_nt_str(node->nt) + "\n");
         if (node->nt == NODE_FUNC) {
             codegen_func(node->func_lhs, &file);
         } else if (node->nt == NODE_TYPE) {
@@ -1612,25 +1793,76 @@ void check_valid_backend(std::string backend) {
     exit(1);
 }
 
+State* set_options(int argc, char** argv) {
+    State* state = new State;
+    bool filepath_set = false;
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "-debug") {
+            state->debug = true;
+        } else if (arg == "-o") {
+            if (i == argc) {
+                print_error_msg("No output file provided after -o flag");
+                exit(1);
+            }
+            i++;
+            state->output_file_path = std::string(argv[i]);
+        } else if (arg == "-I") {
+            if (i == argc) {
+                print_error_msg("No path provided after -I flag");
+                exit(1);
+            }
+            i++;
+            state->include_path = std::string(argv[i]);
+            if (state->include_path[state->include_path.size() - 1] != '/') {
+                state->include_path += '/';
+            }
+        } else if (argv[i][0] == '-') {
+            std::string err = "Unknown option: " + arg;
+            print_error_msg(err);
+            exit(1);
+        } else {
+            state->input_filename = arg;
+            filepath_set = true;
+            char BUFF[255]; // Max number of chars for filename in Linux
+            //std::string full_path = ;
+            state->input_file_dir = getcwd(BUFF, sizeof(BUFF));
+            state->input_file_dir += "/";
+        }
+    }
+    if (!filepath_set) {
+        std::cout << "atlas: " << CL_RED << "error:" << CL_RESET <<" no input files";
+        exit(1);
+    }
+    return state;    
+}
+
 int main(int argc, char** argv) {
-    if (argc != 2) {
+    if (argc == 1) {
         //TODO: print a usage
         std::cout << "atlas: " << CL_RED << "error:" << CL_RESET <<" no input files";
         return 1;
     }
+
+    State* state = set_options(argc, argv);
+    global_state = state;
+    if (state->debug) {
+        std::cout << "[INFO]: Debug Mode is enabled";
+    }
+
     std::string BACKEND = "gcc";
 
-    std::string src = read_file(argv[1]);
-    std::cout << src << "\n";
-    std::cout << "-----TOKENIZING START------\n";
+    std::string src = read_file(state->input_filename);
+    log_print(src + "\n");
+    log_print("-----TOKENIZING START------\n");
     auto tokens = tokenize(src);
     print_tokens(tokens);
-    std::cout << "------TOKENIZING END-------\n\n";
-    std::cout << "--------AST START----------\n";
+    log_print("------TOKENIZING END-------\n\n");
+    log_print("--------AST START----------\n");
     auto ast = ast_create(tokens);
-    std::cout << "---------AST END-----------\n\n";
-    std::cout << "------CODEGEN START--------\n";
+    log_print("---------AST END-----------\n\n");
+    log_print("------CODEGEN START--------\n");
     codegen_start(ast, "out.c", BACKEND);
-    std::cout << "-------CODEGEN END---------\n";
+    log_print("-------CODEGEN END---------\n");
     return 0;
 }
