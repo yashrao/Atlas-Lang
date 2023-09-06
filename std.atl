@@ -4,12 +4,12 @@ putint(i64 number) {
 
     //TODO: make this more efficient once you can make arrays
     // Find the divisor to extract the leftmost digit
-    for i64::kek = 0; number / divisor >= 10; kek = kek + 1 {
+    for number / divisor >= 10 {
         divisor = divisor * 10
     }
 
     // Extract and print each digit
-    for i64::kek = 0; divisor > 0; kek = kek + 1 {
+    for divisor > 0 {
         i64 :: integer = number / divisor
         u8 :: c = '9'
         if integer == 0 {

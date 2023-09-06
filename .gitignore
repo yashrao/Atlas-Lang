@@ -12,3 +12,4 @@ out
 *.out
 test/*.txt
 test/euler/*.txt
+scratch/*

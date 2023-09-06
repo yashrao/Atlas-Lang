@@ -71,6 +71,12 @@ enum TokenType {
     TK_INCLUDE 
 };
 
+enum ForType {
+    FOR_WHILE = 0,
+    FOR_EACH = 1, // not implemented yet
+    FOR_LOOP = 2,
+};
+
 struct Token {
     int line;
     int column;
@@ -181,6 +187,7 @@ struct ExpressionNode : Node {
 };
 
 struct ForNode : Node {
+    ForType for_type;
     struct StatementNode* init;
     ExpressionNode* test;
     struct StatementNode* update;
@@ -1113,57 +1120,82 @@ VarType get_var_type(Token* var_type) {
     return TYPE_INVALID;
 }
 
+int ast_create_for_determine_for(std::vector<Token*> tokens, int* i) {
+    int newline_count = 0;
+    for (int j = *i; j < tokens.size(); j++) {
+        Token* current_token = tokens[j];
+        if (current_token->tt == TK_CURLY_OPEN) {
+            break;
+        } else if (current_token->tt == TK_NEWLINE) {
+            newline_count++;
+        }
+    }
+    return newline_count;
+}
+
 StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
     log_print("Creating ForNode\n");
     StatementNode* ret = new StatementNode;
     ForNode* for_node = new ForNode;
 
     Token* current_token = next_token(tokens, i); // skip for
-    //TODO: make it more generic for other types of statements
-    // init statement
-    // for now assuming its a var_decl but need to fix this later
-    StatementNode* init_statement = new StatementNode;
-    Token* type = current_token;
-    current_token = next_token(tokens, i);
-    expect(current_token, TK_DOUBLE_C);
-    current_token = next_token(tokens, i);
-    expect(current_token, TK_IDENTIFIER);
-    Token* id = current_token;
-    current_token = next_token(tokens, i);
-    expect(current_token, TK_ASSIGN);
-    current_token = next_token(tokens, i);
-    ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
-    VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
-    lhs->lhs->is_array = false;
-    init_statement->nt = NODE_VAR_DECL;
-    init_statement->vardecl_lhs = lhs;
-    init_statement->expr_rhs = rhs;
-    for_node->init = init_statement;
+    int for_type = ast_create_for_determine_for(tokens, i);
+    if (for_type == FOR_LOOP) {
+        //TODO: make it more generic for other types of statements
+        // init statement
+        // for now assuming its a var_decl but need to fix this later
+        StatementNode* init_statement = new StatementNode;
+        Token* type = current_token;
+        current_token = next_token(tokens, i);
+        expect(current_token, TK_DOUBLE_C);
+        current_token = next_token(tokens, i);
+        expect(current_token, TK_IDENTIFIER);
+        Token* id = current_token;
+        current_token = next_token(tokens, i);
+        expect(current_token, TK_ASSIGN);
+        current_token = next_token(tokens, i);
+        ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
+        VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
+        lhs->lhs->is_array = false;
+        init_statement->nt = NODE_VAR_DECL;
+        init_statement->vardecl_lhs = lhs;
+        init_statement->expr_rhs = rhs;
+        for_node->init = init_statement;
 
-    //TODO: skip test expression case
-    // test expression
-    current_token = next_token(tokens, i);
-    expect(current_token, TK_NEWLINE);
-    current_token = next_token(tokens, i); // skip NEWLINE
-    ExpressionNode* test_expr = ast_create_expression(tokens, false, false, false, i);
-    current_token = next_token(tokens, i);
-    expect(current_token, TK_NEWLINE);
-    for_node->test = test_expr;
+        //TODO: skip test expression case
+        // test expression
+        current_token = next_token(tokens, i);
+        expect(current_token, TK_NEWLINE);
+        current_token = next_token(tokens, i); // skip NEWLINE
+        ExpressionNode* test_expr = ast_create_expression(tokens, false, false, false, i);
+        current_token = next_token(tokens, i);
+        expect(current_token, TK_NEWLINE);
+        for_node->test = test_expr;
 
-    // update statement
-    current_token = next_token(tokens, i); // skip NEWLINE
-    StatementNode* update_statement = new StatementNode;
-    Token* var = current_token;
-    VarNode* var_node = ast_create_var(var);
-    current_token = next_token(tokens, i); 
-    current_token = next_token(tokens, i); // skip =
-    ExpressionNode* expr_rhs = ast_create_expression(tokens, false, false, false, i);
-    AssignNode* assign = new AssignNode;
-    assign->lhs = var_node;
-    assign->rhs = expr_rhs;
-    update_statement->nt = NODE_ASSIGN;
-    update_statement->assign_lhs = assign;
-    for_node->update = update_statement;
+        // update statement
+        current_token = next_token(tokens, i); // skip NEWLINE
+        StatementNode* update_statement = new StatementNode;
+        Token* var = current_token;
+        VarNode* var_node = ast_create_var(var);
+        current_token = next_token(tokens, i); 
+        current_token = next_token(tokens, i); // skip =
+        ExpressionNode* expr_rhs = ast_create_expression(tokens, false, false, false, i);
+        AssignNode* assign = new AssignNode;
+        assign->lhs = var_node;
+        assign->rhs = expr_rhs;
+        update_statement->nt = NODE_ASSIGN;
+        update_statement->assign_lhs = assign;
+        for_node->update = update_statement;
+        for_node->for_type = FOR_LOOP;
+    } else if (for_type == FOR_WHILE) {
+        //current_token = next_token(tokens, i); // skip NEWLINE
+        ExpressionNode* test_expr = ast_create_expression(tokens, false, false, false, i);
+        for_node->test = test_expr;
+        for_node->for_type = FOR_WHILE;
+    } else {
+        print_error_msg("For Loop not recognized... Perhaps it is not supported yet");
+        exit(1);
+    }
 
     // block
     current_token = next_token(tokens, i);
@@ -1484,7 +1516,7 @@ void codegen_end(std::ofstream* file, std::string backend) {
         output_file_path = "a.out";
     }
 
-    std::string command = backend + " -nostdlib out.c -o" + output_file_path;
+    std::string command = backend + " -nostdlib out.c -o " + output_file_path;
     log_print("Running \"" + command + "\"\n");
     // Compile C code
     int ret = std::system(command.c_str());
@@ -1678,14 +1710,24 @@ void codegen_if(IfNode* if_node, std::ofstream* file, int tab_level) {
 }
 
 void codegen_for(ForNode* for_node, std::ofstream* file, int tab_level) {
-    *file << "for(";
-    codegen_statement(for_node->init, file, tab_level);
-    *file << "; ";
-    codegen_expr(for_node->test, file);
-    *file << "; ";
-    codegen_statement(for_node->update, file, tab_level);
-    *file << ")\n";
-    codegen_block(for_node->block, file, tab_level + 1);
+    if (for_node->for_type == FOR_LOOP) {
+        *file << "for(";
+        codegen_statement(for_node->init, file, tab_level);
+        *file << "; ";
+        codegen_expr(for_node->test, file);
+        *file << "; ";
+        codegen_statement(for_node->update, file, tab_level);
+        *file << ")\n";
+        codegen_block(for_node->block, file, tab_level + 1);
+    } else if (for_node->for_type == FOR_WHILE) {
+        *file << "for(;";
+        codegen_expr(for_node->test, file);
+        *file << ";)\n";
+        codegen_block(for_node->block, file, tab_level + 1);
+    } else {
+        print_error_msg("Codegen for this for loop type is not implemented yet...");
+        exit(1);
+    }
 }
 
 void codegen_assign(AssignNode* assign, std::ofstream* file) {
@@ -1899,7 +1941,7 @@ int main(int argc, char** argv) {
     log_print("---------AST END-----------\n\n");
     log_print("------CODEGEN START--------\n");
     codegen_start(ast, "out.c", BACKEND);
-    log_print("-------CODEGEN END---------\n");
+    log_print("-------CODEGEN END---------\n\n");
     if (state->run) {
         run_program(state->output_file_path);
     }
