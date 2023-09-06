@@ -2,7 +2,7 @@
 import os
 import subprocess
 
-COMPILE_CMD = ['./atlas', '--include', '.', '--output', 'test/out', '--run']
+COMPILE_CMD = ['./atlas', '--include', '.', '--run']
 RUN_CMD = ['./test/out']
 
 # NOTE: set to True to output all the tests into txt files for convenience
