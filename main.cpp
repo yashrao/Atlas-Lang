@@ -23,6 +23,7 @@ const char* CL_RESET   = "\e[0m";
 
 typedef struct State {
     bool debug;
+    bool run = false;
     std::string output_file_path;
     std::string input_file_dir;
     std::string input_filename;
@@ -1793,21 +1794,35 @@ void check_valid_backend(std::string backend) {
     exit(1);
 }
 
+void print_usage() {
+    std::cout << "Usage: atlas [options] file...\n";
+    std::cout << "Options:\n";
+    std::cout << "    --include <dir>\n";
+    std::cout << "    -I <dir>          Add directory to the Path to the Include search paths\n";
+    std::cout << "    --debug           Used to show logs for Compiler development\n";
+    std::cout << "    --run\n";
+    std::cout << "    -r                Runs the program after compilation.\n";
+    std::cout << "                      NOTE: Removes output file if not specified with -o\n";
+    std::cout << "    --output\n";
+    std::cout << "    -o <filename>     Place the output file in the specified name\n";
+    exit(0);
+}
+
 State* set_options(int argc, char** argv) {
     State* state = new State;
     bool filepath_set = false;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        if (arg == "-debug") {
+        if (arg == "--debug") {
             state->debug = true;
-        } else if (arg == "-o") {
+        } else if (arg == "-o" || arg == "--output") {
             if (i == argc) {
                 print_error_msg("No output file provided after -o flag");
                 exit(1);
             }
             i++;
             state->output_file_path = std::string(argv[i]);
-        } else if (arg == "-I") {
+        } else if (arg == "-I" || arg == "--include") {
             if (i == argc) {
                 print_error_msg("No path provided after -I flag");
                 exit(1);
@@ -1817,6 +1832,10 @@ State* set_options(int argc, char** argv) {
             if (state->include_path[state->include_path.size() - 1] != '/') {
                 state->include_path += '/';
             }
+        } else if (arg == "-r" || arg == "--run") {
+            state->run = true;
+        } else if (arg == "--help") {
+            print_usage();
         } else if (argv[i][0] == '-') {
             std::string err = "Unknown option: " + arg;
             print_error_msg(err);
@@ -1835,6 +1854,23 @@ State* set_options(int argc, char** argv) {
         exit(1);
     }
     return state;    
+}
+
+void run_program(std::string output_file_path) {
+    //TODO: handle case where this fails because codegen didn't succeed
+    std::string command;
+    bool is_output_specified = true;
+    if (output_file_path.size() == 0) {
+        command = "./a.out";
+        output_file_path = "a.out";
+        is_output_specified = false;
+    }
+    command = "./" + output_file_path;
+    int ret = std::system(command.c_str());
+    if (!is_output_specified) {
+        std::string remove = "rm " + output_file_path;
+        std::system(remove.c_str());
+    }
 }
 
 int main(int argc, char** argv) {
@@ -1864,5 +1900,8 @@ int main(int argc, char** argv) {
     log_print("------CODEGEN START--------\n");
     codegen_start(ast, "out.c", BACKEND);
     log_print("-------CODEGEN END---------\n");
+    if (state->run) {
+        run_program(state->output_file_path);
+    }
     return 0;
 }

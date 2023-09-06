@@ -2,7 +2,7 @@
 import os
 import subprocess
 
-COMPILE_CMD = ['./atlas', '-I', '.', '-o', 'test/out']
+COMPILE_CMD = ['./atlas', '--include', '.', '--output', 'test/out', '--run']
 RUN_CMD = ['./test/out']
 
 # NOTE: set to True to output all the tests into txt files for convenience
@@ -16,24 +16,24 @@ class Colors:
 
 def run_test(test_name):
     try:
-        subprocess.check_output(COMPILE_CMD + [test_name])
+        print(' '.join(COMPILE_CMD) + ' ' + test_name)
+        res = subprocess.check_output(COMPILE_CMD + [test_name]).decode('utf-8')
         if OUTPUT_EXPECTED_RESULTS == True:
             output_file_name = test_name.split('.')[0] + '.txt'
             print('Writing file ' + output_file_name)
             with open(output_file_name, 'w') as f:
-                res = subprocess.check_output(RUN_CMD).decode('utf-8')
                 f.write(res)
         else:
             expected_output = ''
             with open(test_name.split('.')[0] + '.txt') as f:
                 expected_output = f.read()
-            res = subprocess.check_output(RUN_CMD).decode('utf-8')
             assert res == expected_output
             print('"' + test_name + '"' + Colors.GREEN + ' SUCCEEDED' + Colors.RESET + '\n')
     except subprocess.CalledProcessError as e:
         print('Error: Process exited with non-zero exit status for "' + test_name + '"')
         print(test_name)
     except FileNotFoundError as e:
+        print('Missing "' + test_name.split('.')[0] + '.txt"')
         print('"' + test_name + '"' + ' has no expected output txt')
         print('Skipping...')
     except AssertionError as e:
@@ -44,9 +44,9 @@ def run_test(test_name):
         print('Actual Output:')
         print(res)
         print('')
-    subprocess.check_output(['rm', 'test/out'])
 
 def main():
+    print('')
     directory = 'test'
     test_files = os.walk(directory)
     res = []
