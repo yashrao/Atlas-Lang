@@ -75,7 +75,9 @@ enum TokenType {
     TK_TYPE,
     TK_PERCENT,
     TK_CHAR,
-    TK_INCLUDE 
+    TK_INCLUDE,
+    TK_NEW,
+    TK_FREE
 };
 
 enum ForType {
@@ -1362,6 +1364,7 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
 
 void atlas_lib(std::ofstream* file) {
     *file << "#include <mimalloc.h>\n";
+    //TODO: might not need this part lol
     *file << "#define SYSCALL_EXIT 60\n"
           << "#define SYSCALL_WRITE 1\n"
           << "typedef unsigned char uchar;\n"
@@ -1376,38 +1379,16 @@ void atlas_lib(std::ofstream* file) {
           << "typedef long long int64;\n"
           << "typedef unsigned long long uint64;\n"
           << "#define true 1\n"
-          << "#define false 0\n"
-          << "#define putchar atlas_putchar\n";
+          << "#define false 0\n";
 
-    *file << "#define MEMORY_POOL_SIZE 690000\n"
-          << "static uint allocated_size = 0;\n"
-          << "typedef struct Block {\n"
-          << "    uint size;\n"
-          << "    struct Block* next;\n"
-          << "} Block;\n"
-          << "static char memory_pool[MEMORY_POOL_SIZE];\n"
-          << "static Block* head = NULL;\n"
-          << "void* atlas_malloc(uint size) {\n"
-          << "    if (allocated_size + size > MEMORY_POOL_SIZE) {\n"
-          << "        return NULL;\n"
-          << "    }\n"
-          << "    void* ptr = &memory_pool[allocated_size];\n"
-          << "    allocated_size += size;\n"
-          << "    return ptr;\n"
-          << "}\n\n"
-
-          << "void atlas_free(void* ptr) {\n"
-          << "    if (ptr == NULL) {\n"
-          << "        return;\n"
-          << "    }\n"
-          << "    Block* block = (Block*)((char*)ptr - sizeof(Block));\n"
-          << "    block->next = head;\n"
-          << "    head = block;\n"
-          << "}\n";
+    *file << "#define putchar atlas_putchar\n"
+          << "#define new mi_malloc\n"
+          << "#define free mi_free\n"
+          << "#define exit atlas_exit\n";
 
     *file << "\n";
 
-    *file << "void sys_exit(int exit_code)\n"
+    *file << "void atlas_exit(int exit_code)\n"
           << "{\n"
           << "\tasm volatile\n"
           << "\t(\n"
@@ -1478,7 +1459,10 @@ void codegen_end_libc(std::ofstream* file, std::string backend) {
         output_file_path = "a.out";
     }
 
-    std::string command = backend + " mimalloc.o -I mimalloc/include/ out.c -o " + output_file_path;
+    //TODO: get rid of this mimalloc string?
+    //      for some reason it doesn't link properly on my machine
+    std::string mimalloc = " mimalloc/out/release/mimalloc.o -I mimalloc/include/ ";
+    std::string command = backend + mimalloc + "out.c -o " + output_file_path;
     log_print("Running \"" + command + "\"\n");
     // Compile C code
     int ret = std::system(command.c_str());
@@ -1508,6 +1492,10 @@ void codegen_array_expr(ArrayNode* array, std::ofstream* file) {
 
 bool codegen_is_intrinsic_function(std::string call_name) {
     if (call_name == "putchar") {
+        return true;
+    } else if (call_name == "new") {
+        return true;
+    } else if (call_name == "free") {
         return true;
     } else {
         return false;

@@ -28,6 +28,7 @@ def run_test(test_name):
             with open(test_name.split('.')[0] + '.txt') as f:
                 expected_output = f.read()
             assert res == expected_output
+            print(res)
             print('"' + test_name + '"' + Colors.GREEN + ' SUCCEEDED' + Colors.RESET + '\n')
     except subprocess.CalledProcessError as e:
         print('Error: Process exited with non-zero exit status for "' + test_name + '"')
