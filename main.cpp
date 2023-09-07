@@ -119,6 +119,7 @@ enum NodeType {
     NODE_CALL,
     NODE_ASSIGN,
     NODE_BINOP,
+    NODE_UNARY,
     NODE_CONSTANT,
     NODE_VAR,
     NODE_RETURN,
@@ -126,7 +127,10 @@ enum NodeType {
     NODE_FOR,
     NODE_TYPE,
     NODE_ARRAY_EXPR,
-    NODE_CHAR
+    NODE_CHAR,
+    NODE_QUOTE,
+    NODE_SUBSCRIPT,
+    NODE_MEMBER_ACCESS,
 };
 
 struct Node {
@@ -156,23 +160,44 @@ struct TypeNode : Node {
     std::vector<VarDeclNode*> declarations;
 };
 
-struct CallNode : Node {
-    Token* name;
-    std::vector<struct ExpressionNode*> args;
-};
-
 struct BinaryOpNode : Node {
     struct ExpressionNode* lhs;
     struct ExpressionNode* rhs;
     Token* op;
 };
 
+struct CallNode : Node {
+    Token* name;
+    std::vector<struct ExpressionNode*> args;
+};
+
+struct SubscriptNode : Node {
+    bool is_declaration = false;
+    //ExpressionNode* arr_ref;
+    Token* arr_ref;
+    std::vector<struct ExpressionNode*> indexes;
+};
+
+struct MemberAccessNode : Node {
+    Token* member_access;
+};
+
 struct UnaryOpNode : Node {
     //TODO: look to move certain things to here
+    NodeType operator_type;
+    union {
+        SubscriptNode* subscript;
+        CallNode* call_node;
+    };
+    struct ExpressionNode* operand;
 };
 
 struct ConstantNode : Node {
     int value;
+};
+
+struct QuoteNode : Node {
+    Token* quote_token;
 };
 
 struct CharacterNode : Node {
@@ -192,6 +217,8 @@ struct ExpressionNode : Node {
         VarNode* var_node;
         CallNode* call_node;
         ArrayNode* array;
+        QuoteNode* quote;
+        SubscriptNode* subscript;
     };
 };
 
@@ -381,6 +408,14 @@ std::string get_nt_str(NodeType nt) {
         return "NODE_ARRAY_EXPR";
     case NODE_CHAR:
         return "NODE_CHAR";
+    case NODE_QUOTE:
+        return "NODE_QUOTE";
+    case NODE_SUBSCRIPT:
+        return "NODE_SUBSCRIPT";
+    case NODE_UNARY:
+        return "NODE_UNARY";
+    case NODE_MEMBER_ACCESS:
+        return "NODE_MEMBER_ACCESS";
     default:
         return "NODE_INVALID";
     }
@@ -497,7 +532,8 @@ bool is_delim(char c) {
         c == '[' || c == ']' || 
         c == '"' || c == '\'' ||
         c == ':' || c == '\n' || 
-        c == ';' || c == ',') 
+        c == ';' || c == ',' ||
+        c == '.')  
     {
         return true;
     }
@@ -588,7 +624,8 @@ std::vector<Token*> tokenize (std::string src) {
                 line++;
             } else if (c == '+' || c == '(' || c == ')' || c == '*' ||
                        c == '{' || c == '}' || c == '=' || c == '[' ||
-                       c == ']' || c == ',' || c == '%' || c == '/') {
+                       c == ']' || c == ',' || c == '%' || c == '/' ||
+                       c == '.') {
                 if (c == '=' && lookahead == '=') {
                     i += 1;
                     ret.push_back(save_token(line, column, TK_EQUAL, "=="));
@@ -675,7 +712,8 @@ void expect(Token* token, TokenType expected) {
     if (token->tt != expected) {
         //std::cout << expected;
         std::string err = " Expected: \"" + std::string(get_tt_str(expected))
-        + "\"\n         Got: " + token->token;
+                          + "\"\n         Got: " + token->token
+                          + " (" + std::to_string(token->line) + ", " + std::to_string(token->column) + ")";
         print_error_msg(err);
         exit(1);
     }
@@ -788,7 +826,7 @@ StatementNode* ast_create_return(std::vector<Token*> tokens, int* i) {
 }
 
 VarNode* ast_create_var(Token* identifier) {
-    log_print("Creating VariableNode "" + identifier->token + ""\n");
+    log_print("Creating VariableNode \"" + identifier->token + "\"\n");
     VarNode* ret = new VarNode;
     ret->type_ = NULL;
     ret->nt = NODE_VAR;
@@ -812,7 +850,7 @@ VarDeclNode* ast_create_var_decl(VarType type, Token* type_id, Token* identifier
 }
 
 ExpressionNode* ast_create_variable_expr(VarType type, Token* identifier, int* i) {
-    log_print("Creating VariableNode "" + identifier->token + ""\n");
+    log_print("Creating VariableNode (e)\"" + identifier->token + "\"\n");
     ExpressionNode* ret = new ExpressionNode;
     ret->nt = NODE_VAR;
     VarNode* _node = ast_create_var(identifier);
@@ -829,6 +867,17 @@ ExpressionNode* ast_create_constant(Token* constant_value) {
     ret->nt = NODE_CONSTANT;
 
     ret->constant = constant;
+    return ret;
+}
+
+ExpressionNode* ast_create_quote(Token* quote_token) {
+    log_print("Creating QuoteNode\n");
+    ExpressionNode* ret = new ExpressionNode;
+    QuoteNode* quote = new QuoteNode;
+    quote->quote_token = quote_token;
+    ret->nt = NODE_QUOTE;
+    ret->quote = quote;
+
     return ret;
 }
 
@@ -853,6 +902,7 @@ int get_prec(TokenType tt) {
     case TK_PAREN_OPEN:
         return 7;
     case TK_SQUARE_OPEN:
+    case TK_DOT:
         return 6;
     case TK_STAR:
     case TK_SLASH:
@@ -923,6 +973,56 @@ ExpressionNode* ast_create_array_decl(std::vector<Token*> tokens, int* i) {
     return ret;
 }
 
+ExpressionNode* ast_create_subscript_node(std::vector<Token*> tokens, int* i) {
+    log_print("Creating Subscript Node\n");
+    ExpressionNode* ret = new ExpressionNode;
+    SubscriptNode* subscript = new SubscriptNode;
+    Token* current_token = next_token(tokens, i);
+    if (current_token->tt != TK_SQUARE_CLOSE) {
+        for (; *i < tokens.size(); (*i)++) {
+            subscript->indexes.push_back(ast_create_expression(tokens,
+                                                          false,
+                                                          false,
+                                                          true,
+                                                          i));
+            current_token = tokens[*i];
+            Token* lookahead = ast_get_lookahead(tokens, i);
+            if (current_token->tt == TK_SQUARE_CLOSE
+                || lookahead->tt == TK_SQUARE_CLOSE)
+            {
+                break;
+            }
+        }
+    }
+    ret->nt = NODE_SUBSCRIPT;
+    ret->subscript = subscript;
+    return ret;
+}
+
+bool is_op_binary(Token* op) {
+    switch(op->tt) {
+    case TK_EQUAL:
+    case TK_PLUS:
+    case TK_DASH:
+    case TK_STAR:
+    case TK_SLASH:
+    case TK_GT:
+    case TK_GTE:
+    case TK_LT:
+    case TK_LTE:
+    case TK_DOT:
+    case TK_PERCENT:
+        return true;
+    case TK_NOT:
+    case TK_SQUARE_OPEN:
+        return false;
+    default:
+        std::string err = "\"" + op->token + "\" is not a valid operator";
+        print_error_msg(err);
+        exit(1);
+    }
+}
+
 ExpressionNode* 
 ast_create_expr_prec(
         std::vector<Token*> tokens,
@@ -943,13 +1043,17 @@ ast_create_expr_prec(
         lhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i], i);
     } else if (current_token->tt == TK_CONSTANT) {
         lhs = ast_create_constant(tokens[*i]);
+    } else if (current_token->tt == TK_QUOTE) {
+        lhs = ast_create_quote(tokens[*i]);
     } else if (current_token->tt == TK_SQUARE_OPEN) {
-        lhs = ast_create_array_decl(tokens, i);
+        //lhs = ast_create_array_decl(tokens, i); // only for array_decl
+        lhs = ast_create_subscript_node(tokens, i); // only for array_decl
     } else if (current_token->tt == TK_CHAR) {
         lhs = ast_create_char(tokens[*i]);
     }
     //operator is the lookahead
     ExpressionNode* rhs = NULL;
+    ExpressionNode* unary_op_expr = NULL;
 
     // Make sure it is updated
     current_token = tokens[*i];  
@@ -975,41 +1079,70 @@ ast_create_expr_prec(
         while(get_prec(lookahead->tt) >= precedence) {
             current_token = next_token(tokens, i);
             Token* op = current_token; // operator is a lookahead
+            log_print("Operator: ");
             print_token(op);
-            current_token = next_token(tokens, i); // rhs
-            lookahead = ast_get_lookahead(tokens, i);
-            if (current_token->tt == TK_IDENTIFIER
-                && lookahead->tt == TK_PAREN_OPEN) {
-                // Function Call
-                rhs = ast_create_call(current_token, tokens, i);
-            } else if (current_token->tt == TK_IDENTIFIER) {
-                // Variable
-                rhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i], i);
-            } else if (current_token->tt == TK_CONSTANT) {
-                // Constant TODO: handle quotes 
-                rhs = ast_create_constant(tokens[*i]);
-            } else if (NULL) {
-                //TODO: add unary operator here e.g. []
-            // } else if (current_token->tt == TK_CHAR) {
-            //     rhs = ast_create_char(tokens[*i]);
-            } else {
-                return lhs;
-            }
-            lookahead = ast_get_lookahead(tokens, i);
-            // TODO: handle left associativity
-            // TODO: MIGHT BE FAILING HERE FOR ARRAY EXPR 
-            while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
-                if (get_prec(lookahead->tt) > get_prec(op->tt))
-                    rhs = ast_create_expr_prec(tokens, get_prec(op->tt) + 1, is_args, is_cond, is_arr, i);
-                else
-                    rhs = ast_create_expr_prec(tokens, get_prec(op->tt), is_args, is_cond, is_arr, i);
-                current_token = next_token(tokens, i);
-                if (current_token->tt == TK_NEWLINE || current_token->tt == TK_COMMA) {
+            if (!is_op_binary(op)) {
+                UnaryOpNode* unary_op_node = new UnaryOpNode;
+                unary_op_node->nt = NODE_UNARY;
+                unary_op_node->operand = lhs;
+                lhs = new ExpressionNode;
+                lhs->nt = NODE_UNARY;
+                // unary op
+                switch(op->tt) {
+                case TK_SQUARE_OPEN:
+                    unary_op_node->subscript = ast_create_subscript_node(tokens, i)->subscript;
+                    unary_op_node->operator_type = NODE_SUBSCRIPT;
+                    lhs->unary_op = unary_op_node;
                     break;
+                case TK_NOT:
+                    // NOTE: NOT AND * ARE LEFT ASSOCIATIVE
+                    std::string err = "\"" + op->token + "\" is not implemented yet";
+                    print_error_msg(err);
+                    exit(1);
+                    //TODO: fix this switch
+                //default:
+                    //std::string err = "\"" + op->token + "\" is not a valid operator";
+                    print_error_msg(err);
+                    exit(1);
+                }
+            } else {
+                current_token = next_token(tokens, i); // rhs
+                lookahead = ast_get_lookahead(tokens, i);
+                if (current_token->tt == TK_IDENTIFIER
+                    && lookahead->tt == TK_PAREN_OPEN) {
+                    // Function Call
+                    rhs = ast_create_call(current_token, tokens, i);
+                } else if (current_token->tt == TK_IDENTIFIER) {
+                    // Variable
+                    rhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i], i);
+                } else if (current_token->tt == TK_CONSTANT) {
+                    // Constant TODO: handle quotes 
+                    rhs = ast_create_constant(tokens[*i]);
+                } else if (current_token->tt == TK_QUOTE) {
+                    rhs = ast_create_quote(tokens[*i]);
+                } else if (NULL) {
+                    //TODO: add unary operator here e.g. []
+                // } else if (current_token->tt == TK_CHAR) {
+                //     rhs = ast_create_char(tokens[*i]);
+                } else {
+                    return lhs;
                 }
                 lookahead = ast_get_lookahead(tokens, i);
+                // TODO: handle left associativity
+                // TODO: MIGHT BE FAILING HERE FOR ARRAY EXPR 
+                while (get_prec(lookahead->tt) >= get_prec(op->tt)) {
+                    if (get_prec(lookahead->tt) > get_prec(op->tt))
+                        rhs = ast_create_expr_prec(tokens, get_prec(op->tt) + 1, is_args, is_cond, is_arr, i);
+                    else
+                        rhs = ast_create_expr_prec(tokens, get_prec(op->tt), is_args, is_cond, is_arr, i);
+                    current_token = next_token(tokens, i);
+                    if (current_token->tt == TK_NEWLINE || current_token->tt == TK_COMMA) {
+                        break;
+                    }
+                    lookahead = ast_get_lookahead(tokens, i);
+                }
+                lhs = ast_create_binop(lhs, rhs, op);
             }
-            lhs = ast_create_binop(lhs, rhs, op);
             lookahead = ast_get_lookahead(tokens, i);
             if (current_token->tt == TK_NEWLINE ||
                 lookahead->tt == TK_NEWLINE ||
@@ -1187,23 +1320,25 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
         if (current_token->tt == TK_CURLY_CLOSE) {
             break;
         }
+
+        //FIXME: compiler thinks test[1] and u8 :: are same
         if (current_token->tt == TK_IDENTIFIER) {
             //expect(current_token, TK_IDENTIFIER);
             Token* tmp = current_token;
             current_token = next_token(tokens, i);
             bool is_array = false;
             ExpressionNode* arr_size = NULL; // incase the var is an array
+            if (current_token->tt == TK_SQUARE_OPEN) {
+                // array type   
+                is_array = true;
+                current_token = next_token(tokens, i); // expr
+                arr_size = ast_create_expression(tokens, false, false, true, i);
+                current_token = tokens[*i]; // update current_token
+                expect(current_token, TK_SQUARE_CLOSE);
+                current_token = next_token(tokens, i);
+            }
             if (current_token->tt == TK_DOUBLE_C || current_token->tt == TK_SQUARE_OPEN) {
                 Token* type = tmp;
-                if (current_token->tt == TK_SQUARE_OPEN) {
-                    // array type   
-                    is_array = true;
-                    current_token = next_token(tokens, i); // expr
-                    arr_size = ast_create_expression(tokens, false, false, true, i);
-                    current_token = tokens[*i]; // update current_token
-                    expect(current_token, TK_SQUARE_CLOSE);
-                    current_token = next_token(tokens, i);
-                }
                 expect(current_token, TK_DOUBLE_C);
                 current_token = next_token(tokens, i);
                 expect(current_token, TK_IDENTIFIER);
@@ -1212,6 +1347,9 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
                 expect(current_token, TK_ASSIGN);
                 current_token = next_token(tokens, i);
                 ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
+                if (is_array && rhs->nt == NODE_SUBSCRIPT) {
+                    rhs->subscript->is_declaration = true;
+                }
                 VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
                 lhs->lhs->is_array = is_array;
                 lhs->lhs->arr_size = arr_size;
@@ -1224,6 +1362,8 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             } else if (current_token->tt == TK_ASSIGN) {
                 Token* var = tmp;
                 VarNode* var_node = ast_create_var(var);
+                var_node->is_array = is_array;
+                var_node->arr_size = arr_size;
                 current_token = next_token(tokens, i); // skip =
                 ExpressionNode* expr_rhs = ast_create_expression(tokens, false, false, false, i);
                 AssignNode* assign = new AssignNode;
@@ -1385,7 +1525,19 @@ void atlas_lib(std::ofstream* file) {
           << "#define new mi_malloc\n"
           << "#define free mi_free\n"
           << "#define exit atlas_exit\n";
+    *file << "\n";
 
+    *file << "typedef struct AtlasTypeString {\n"
+          << "    char* str;\n"
+          << "    uint64 size;\n"
+          << "} AtlasTypeString;\n";
+
+    *file << "\n";
+    *file << "AtlasTypeString atlas_create_string(char* str, uint64 size) {\n"
+          << "    char* _1 = mi_malloc(size * sizeof(char));\n"
+          << "    _1[0]='b';_1[1]='l';_1[2]='a';_1[3]='h';\n"
+          << "    return (AtlasTypeString){_1, size};\n"
+          << "}\n";
     *file << "\n";
 
     *file << "void atlas_exit(int exit_code)\n"
@@ -1510,11 +1662,56 @@ void codegen_char(CharacterNode* character, std::ofstream* file) {
     *file << "'";
 }
 
+void codegen_quote(QuoteNode* quote, std::ofstream* file) {
+    *file << "atlas_create_string("
+          << "\"" << quote->quote_token->token << "\""
+          << ","  << quote->quote_token->token.size()
+          << ")";
+}
+
+void codegen_subscript(SubscriptNode* subscript, std::ofstream* file) {
+    if (subscript->is_declaration) {
+        *file << "{";
+    } else {
+        *file << "[";
+    }
+    for (int i = 0; i < subscript->indexes.size(); i++) {
+        ExpressionNode* index = subscript->indexes[i];
+        codegen_expr(index, file);
+        if (i == subscript->indexes.size() - 1) {
+            break;
+        }
+        *file << ", ";
+    }
+    if (subscript->is_declaration) {
+        *file << "}";
+    } else {
+        *file << "]";
+    }
+}
+
+void codegen_unary_op(UnaryOpNode* unary_op, std::ofstream* file) {
+    std::string str;
+    switch(unary_op->operator_type) {
+    case NODE_SUBSCRIPT:
+        codegen_expr(unary_op->operand, file);
+        codegen_subscript(unary_op->subscript, file);
+        break;
+    default:
+        print_error_msg("unary op not implemented yet\n");
+        exit(1);
+    }
+}
+
 void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
     switch(expression->nt) {
     case NODE_BINOP:
         codegen_expr(expression->binop->lhs, file);
-        *file << " " << expression->binop->op->token << " ";
+        if (expression->binop->op-> token == ".") {
+            *file << expression->binop->op->token;
+        } else {
+            *file << " " << expression->binop->op->token << " ";
+        }
         codegen_expr(expression->binop->rhs, file);
         break;
     case NODE_CONSTANT:
@@ -1542,6 +1739,15 @@ void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
         break;
     case NODE_CHAR:
         codegen_char(expression->character, file);
+        break;
+    case NODE_QUOTE:
+        codegen_quote(expression->quote, file);
+        break;
+    case NODE_SUBSCRIPT:
+        codegen_subscript(expression->subscript, file);
+        break;
+    case NODE_UNARY:
+        codegen_unary_op(expression->unary_op, file);
         break;
     default:
         std::string err = "CODEGEN EXPR " + get_nt_str(expression->nt) + "\n";
@@ -1572,6 +1778,8 @@ std::string codegen_get_c_type(Token* atlas_type) {
         return "char";
         //print_error_msg("\"u8\" IS NOT SUPPORTED");
         //exit(1);
+    } else if (atlas_type->token == "string") {
+        return "AtlasTypeString";
     }
     std::string err = "The \"" + atlas_type->token + "\" type is not supported";
     print_error_msg(err);
@@ -1607,8 +1815,10 @@ void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
     // lhs
     if (codegen_is_c_type(var_decl->lhs->type_)) {
         *file << codegen_get_c_type(var_decl->lhs->type_) << " " << var_decl->lhs->identifier->token;
+    } else if (var_decl->lhs->type_->token == "string") {
+        *file << "AtlasTypeString " << var_decl->lhs->identifier->token;
     } else {
-        *file << var_decl->lhs->type_->token << var_decl->lhs->identifier->token;
+        *file << var_decl->lhs->type_->token << " " << var_decl->lhs->identifier->token;
     }
 
     print_token(var_decl->lhs->identifier);
@@ -1683,6 +1893,11 @@ void codegen_for(ForNode* for_node, std::ofstream* file, int tab_level) {
 void codegen_assign(AssignNode* assign, std::ofstream* file) {
     // lhs
     *file << assign->lhs->identifier->token;
+    if (assign->lhs->is_array) {
+        *file << "[";
+        codegen_expr(assign->lhs->arr_size, file);
+        *file << "]";
+    }
     // rhs
     *file << " = ";
     codegen_expr(assign->rhs, file);
