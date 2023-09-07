@@ -5,10 +5,10 @@
 #include <cctype>
 #include <cstring>
 #include <unistd.h>
-
 // debug
 #include <memory>
 
+#define DEPEND_LIBC
 
 // Colors
 const char* CL_BLACK   = "\e[0;30m";
@@ -21,14 +21,21 @@ const char* CL_CYAN    = "\e[0;36m";
 const char* CL_WHITE   = "\e[0;37m";
 const char* CL_RESET   = "\e[0m";
 
-typedef struct State {
+struct State {
     bool debug;
     bool run = false;
+    bool emit_c = true;
     std::string output_file_path;
     std::string input_file_dir;
     std::string input_filename;
     std::string include_path;
-} State;
+};
+
+struct Scope {
+    struct Scope* prev;
+    std::vector<struct VarNode*> names;
+    std::vector<struct FunctionNode*> func_names;
+};
 
 enum TokenType {
     TK_NEWLINE = 100,
@@ -243,6 +250,7 @@ struct StatementNode : Node {
 };
 
 struct BlockNode : Node {
+    Scope* scope;
     std::vector<StatementNode*>* statements;
 };
 
@@ -681,70 +689,7 @@ void print_node(Node* node, int tab_level) {
     printf("[DEBUG]: ");
     print_tabs(tab_level);
     printf(" %s├─%s", CL_YELLOW, CL_RESET);
-    //printf(" %s->%s", CL_YELLOW, CL_RESET);
     printf(" ");
-    /*
-    switch(node->nt) {
-    case NODE_BINOP:
-        printf("%sBinOpNode%s <%c>",
-               CL_CYAN,
-               CL_RESET,
-               *(node->binop->op->beg));
-        printf("\n");
-        print_node(node->binop->lhs, tab_level + 1);
-        print_node(node->binop->rhs, tab_level + 1);
-        break;
-    case NODE_CONSTANT:
-        printf("%sConstantNode%s <%d>",
-               CL_CYAN,
-               CL_RESET,
-               node->constant->iVal);
-        printf("\n");
-        break;
-    case NODE_BLOCK: {
-        printf("%sBlockNode%s\n", CL_CYAN, CL_RESET);
-        Node* current_node = node->block->statements;
-        current_node = current_node->next; // skip root node
-        while (current_node != NULL) {
-            print_node(current_node, tab_level + 1);
-            current_node = current_node->next;
-        }
-        break;
-    }
-    case NODE_VAR_DECL:
-        printf("%sVarDeclNode%s\n", CL_CYAN, CL_RESET);
-        print_node(node->var_decl->lhs, tab_level + 1);
-        print_node(node->var_decl->rhs, tab_level + 1);
-        break;
-    case NODE_FUNC: {
-        printf("%sFuncNode%s <\"", CL_CYAN, CL_RESET);
-        print_token_str(node->func->name);
-        printf("\">\n");
-        print_node(node->func->block, tab_level + 1);
-        break;
-    }
-    case NODE_VAR: {
-        printf("%sVariableNode%s <\"", CL_CYAN, CL_RESET);
-        print_token_str(node->var->identifier);
-        printf("\">\n");
-        break;
-    }
-    case NODE_RETURN:
-        printf("%sReturnNode%s\n", CL_CYAN, CL_RESET);
-        print_node(node->ret->ret_expr, tab_level + 1);
-        break;
-    case NODE_CALL:
-        printf("%sCallNode%s <\"", CL_CYAN, CL_RESET);
-        print_token_str(node->call->name);
-        printf("\">\n");
-        break;
-    default:
-        print_error_msg("Something has horribly gone wrong");
-        printf("%d\n", node->nt);
-        break;
-    }
-    */
-    //printf("\n");
 }
 
 void print_nodes(std::vector<Node*> nodes) {
@@ -841,6 +786,7 @@ StatementNode* ast_create_return(std::vector<Token*> tokens, int* i) {
 }
 
 VarNode* ast_create_var(Token* identifier) {
+    log_print("Creating VariableNode "" + identifier->token + ""\n");
     VarNode* ret = new VarNode;
     ret->type_ = NULL;
     ret->nt = NODE_VAR;
@@ -853,7 +799,6 @@ VarDeclNode* ast_create_var_decl(VarType type, Token* type_id, Token* identifier
     log_print("Creating Variable Declaration\n");
     VarDeclNode* ret = new VarDeclNode;
     VarNode* _node = new VarNode;
-    //VariableNode* _node = calloc(1, sizeof(VariableNode));
     ret->nt = NODE_VAR_DECL;
     _node->type_ = type_id;
     _node->nt = NODE_VAR_DECL;
@@ -861,21 +806,16 @@ VarDeclNode* ast_create_var_decl(VarType type, Token* type_id, Token* identifier
     _node->identifier = identifier;
     ret->lhs = _node;
     ret->rhs = rhs;
-    //ret->var = _node;
     return ret;
 }
 
-ExpressionNode* ast_create_variable_expr(VarType type, Token* identifier) {
-    log_print("Creating VariableNode\n");
+ExpressionNode* ast_create_variable_expr(VarType type, Token* identifier, int* i) {
+    log_print("Creating VariableNode "" + identifier->token + ""\n");
     ExpressionNode* ret = new ExpressionNode;
-    VarNode* _node = new VarNode;
-    //VariableNode* _node = calloc(1, sizeof(VariableNode));
     ret->nt = NODE_VAR;
-    _node->nt = NODE_VAR;
+    VarNode* _node = ast_create_var(identifier);
     _node->type = type;
-    _node->identifier = identifier;
     ret->var_node = _node;
-    //ret->var = _node;
     return ret;
 }
 
@@ -998,7 +938,7 @@ ast_create_expr_prec(
     if (current_token->tt == TK_IDENTIFIER && lookahead->tt == TK_PAREN_OPEN) {
         lhs = ast_create_call(current_token, tokens, i);
     } else if (current_token->tt == TK_IDENTIFIER) {
-        lhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i]);
+        lhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i], i);
     } else if (current_token->tt == TK_CONSTANT) {
         lhs = ast_create_constant(tokens[*i]);
     } else if (current_token->tt == TK_SQUARE_OPEN) {
@@ -1015,10 +955,6 @@ ast_create_expr_prec(
     if (is_args && current_token->tt == TK_PAREN_CLOSE) {
         (*i)++; // Throw away closed bracket
         return lhs;
-    // } else if (is_args && lookahead->tt == TK_PAREN_CLOSE) {
-    //     (*i)++; // Throw away closed bracket
-    //     (*i)++; // Throw away closed bracket
-    //     return lhs;
     } else if (is_arr && (current_token->tt == TK_SQUARE_CLOSE) || (lookahead->tt == TK_SQUARE_CLOSE)) {
         (*i)++; // Throw away closed square bracket
         return lhs;
@@ -1046,7 +982,7 @@ ast_create_expr_prec(
                 rhs = ast_create_call(current_token, tokens, i);
             } else if (current_token->tt == TK_IDENTIFIER) {
                 // Variable
-                rhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i]);
+                rhs = ast_create_variable_expr(TYPE_UNKNOWN, tokens[*i], i);
             } else if (current_token->tt == TK_CONSTANT) {
                 // Constant TODO: handle quotes 
                 rhs = ast_create_constant(tokens[*i]);
@@ -1425,6 +1361,7 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
 }
 
 void atlas_lib(std::ofstream* file) {
+    *file << "#include <mimalloc.h>\n";
     *file << "#define SYSCALL_EXIT 60\n"
           << "#define SYSCALL_WRITE 1\n"
           << "typedef unsigned char uchar;\n"
@@ -1438,10 +1375,8 @@ void atlas_lib(std::ofstream* file) {
           << "typedef unsigned int uint;\n"
           << "typedef long long int64;\n"
           << "typedef unsigned long long uint64;\n"
-          << "#define bool ushort\n"
           << "#define true 1\n"
           << "#define false 0\n"
-          << "#define NULL 0\n"
           << "#define putchar atlas_putchar\n";
 
     *file << "#define MEMORY_POOL_SIZE 690000\n"
@@ -1498,12 +1433,14 @@ void atlas_lib(std::ofstream* file) {
 }
 
 void codegen_init_c(std::vector<StatementNode*> ast, std::ofstream* file) {
+    #ifndef DEPEND_LIBC
 	*file << "void _start(void)\n"
           << "{\n"
           << "\tint ret = main();\n";
 
     *file << "\tsys_exit(ret);\n"
           << "}\n\n";
+    #endif
 }
 
 void codegen_end(std::ofstream* file, std::string backend) {
@@ -1517,6 +1454,31 @@ void codegen_end(std::ofstream* file, std::string backend) {
     }
 
     std::string command = backend + " -nostdlib out.c -o " + output_file_path;
+    log_print("Running \"" + command + "\"\n");
+    // Compile C code
+    int ret = std::system(command.c_str());
+    //TODO: not sure what scenarios this works/not works
+    if (WEXITSTATUS(ret) != 0x00) {
+        std::string err = backend + " backend Failed to compile C program";
+        print_error_msg(err.c_str());
+        std::cout << "                  Check " << backend << " error messages\n";
+        std::cout << "                  Exit Code: " << ret << "\n";
+        exit(1);
+    }
+    log_print("Generated binary \"" + output_file_path + "\"\n");
+}
+
+void codegen_end_libc(std::ofstream* file, std::string backend) {
+    (*file).close();
+
+    std::string output_file_path;
+    if(global_state->output_file_path.size() != 0) {
+        output_file_path = global_state->output_file_path;
+    } else {
+        output_file_path = "a.out";
+    }
+
+    std::string command = backend + " mimalloc.o -I mimalloc/include/ out.c -o " + output_file_path;
     log_print("Running \"" + command + "\"\n");
     // Compile C code
     int ret = std::system(command.c_str());
@@ -1562,42 +1524,42 @@ void codegen_char(CharacterNode* character, std::ofstream* file) {
 
 void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
     switch(expression->nt) {
-        case NODE_BINOP:
-            codegen_expr(expression->binop->lhs, file);
-            *file << " " << expression->binop->op->token << " ";
-            codegen_expr(expression->binop->rhs, file);
-            break;
-        case NODE_CONSTANT:
-            *file << expression->constant->value;
-            break;
-        case NODE_CALL:
-        {
-            std::string call_name = expression->call_node->name->token;
-            if (codegen_is_intrinsic_function(call_name)) {
-                *file << "atlas_" << expression->call_node->name->token << "("; 
-            } else {
-                *file << expression->call_node->name->token << "("; 
-            }
-            for (auto arg : expression->call_node->args) {
-                codegen_expr(arg, file);
-            }
-            *file << ")";
-            break;
+    case NODE_BINOP:
+        codegen_expr(expression->binop->lhs, file);
+        *file << " " << expression->binop->op->token << " ";
+        codegen_expr(expression->binop->rhs, file);
+        break;
+    case NODE_CONSTANT:
+        *file << expression->constant->value;
+        break;
+    case NODE_CALL:
+    {
+        std::string call_name = expression->call_node->name->token;
+        if (codegen_is_intrinsic_function(call_name)) {
+            *file << "atlas_" << expression->call_node->name->token << "("; 
+        } else {
+            *file << expression->call_node->name->token << "("; 
         }
-        case NODE_VAR:
-            *file << expression->var_node->identifier->token;
-            break;
-        case NODE_ARRAY_EXPR:
-            codegen_array_expr(expression->array, file);
-            break;
-        case NODE_CHAR:
-            codegen_char(expression->character, file);
-            break;
-        default:
-            std::string err = "CODEGEN EXPR " + get_nt_str(expression->nt) + "\n";
-            print_error_msg(err);
-            std::cout << expression->nt;
-            exit(1);
+        for (auto arg : expression->call_node->args) {
+            codegen_expr(arg, file);
+        }
+        *file << ")";
+        break;
+    }
+    case NODE_VAR:
+        *file << expression->var_node->identifier->token;
+        break;
+    case NODE_ARRAY_EXPR:
+        codegen_array_expr(expression->array, file);
+        break;
+    case NODE_CHAR:
+        codegen_char(expression->character, file);
+        break;
+    default:
+        std::string err = "CODEGEN EXPR " + get_nt_str(expression->nt) + "\n";
+        print_error_msg(err);
+        std::cout << expression->nt;
+        exit(1);
     }
 }
 
@@ -1740,24 +1702,24 @@ void codegen_assign(AssignNode* assign, std::ofstream* file) {
 
 bool codegen_statement(StatementNode* statement, std::ofstream* file, int tab_level) {
     switch(statement->nt) {
-        case NODE_VAR_DECL:
-            codegen_var_decl(statement->vardecl_lhs, file);
-            return true;
-        case NODE_ASSIGN:
-            codegen_assign(statement->assign_lhs, file);
-            return true;
-        case NODE_IF:
-            codegen_if(statement->if_lhs, file, tab_level);
-            return false;
-        case NODE_RETURN:
-            codegen_return(statement, file);
-            return true;
-        case NODE_FOR:
-            codegen_for(statement->for_lhs, file, tab_level);
-            return false;
-        case NODE_CALL:
-            codegen_expr(statement->expr_lhs, file);
-            return true;
+    case NODE_VAR_DECL:
+        codegen_var_decl(statement->vardecl_lhs, file);
+        return true;
+    case NODE_ASSIGN:
+        codegen_assign(statement->assign_lhs, file);
+        return true;
+    case NODE_IF:
+        codegen_if(statement->if_lhs, file, tab_level);
+        return false;
+    case NODE_RETURN:
+        codegen_return(statement, file);
+        return true;
+    case NODE_FOR:
+        codegen_for(statement->for_lhs, file, tab_level);
+        return false;
+    case NODE_CALL:
+        codegen_expr(statement->expr_lhs, file);
+        return true;
     }
     return false;
 }
@@ -1822,7 +1784,7 @@ void codegen_start(std::vector<StatementNode*> ast, std::string filename, std::s
         }
     }
     codegen_init_c(ast, &file);
-    codegen_end(&file, backend);
+    codegen_end_libc(&file, backend);
 }
 
 /* Codegen end */
@@ -1876,6 +1838,8 @@ State* set_options(int argc, char** argv) {
             }
         } else if (arg == "-r" || arg == "--run") {
             state->run = true;
+        } else if (arg == "-E" || arg == "--emit-c") {
+            state->emit_c = true;
         } else if (arg == "--help") {
             print_usage();
         } else if (argv[i][0] == '-') {
@@ -1911,6 +1875,10 @@ void run_program(std::string output_file_path) {
     int ret = std::system(command.c_str());
     if (!is_output_specified) {
         std::string remove = "rm " + output_file_path;
+        std::system(remove.c_str());
+    }
+    if (!global_state->emit_c) {
+        std::string remove = "rm out.c";
         std::system(remove.c_str());
     }
 }
