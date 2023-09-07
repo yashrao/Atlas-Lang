@@ -2,6 +2,27 @@
 **P.S. Name may not be final - but it is Atlas for now**
 Atlas is aimed to be a statically typed compiled language and is aimed to be very similar to C (in-fact it compiles to C). This is being made as a learning exercise and is currently under development.
 
+## What works now?
+Currently you can solve some extremely basic problems, below is from problem 1 from Project Euler.
+```rust
+// test/euler/problem1.atl
+include "std.atl"
+
+main() -> i64 {
+    i64 :: sum = 0
+    for i64::i = 0; i < 10; i = i + 1 {
+        if i % 3 == 0 {
+	        sum = sum + i
+	    } else if i % 5 == 0 {
+	        sum = sum + i
+        }
+    }
+    putint(sum)
+    -> 0
+}
+
+```
+
 ## Planned Design
 Below are some sample programs that have been written to encapsulate what kind of syntax Atlas will have with a full set of features (Note: this is just a proof of concept, see below for what works currently):
 
@@ -46,23 +67,6 @@ main () {
 }
 ```
 
-## What works now?
-Currently you can solve some extremely basic problems, below is from problem 1 from Project Euler
-```Rust
-// problem1.atl
-main() -> i64 {
-    i64 :: sum = 0
-    for i64::i = 0; i < 10; i = i + 1 {
-        if i % 3 == 0 {
-	    sum = sum + i
-	} else if i % 5 == 0 {
-            sum = sum + i
-        }
-    }
-    -> sum
-}
-```
-
 ## TODO
 The Compiler has just started development so it doesn't do much:
 - [X] Parser 
@@ -79,10 +83,13 @@ The Compiler has just started development so it doesn't do much:
   - [X] Assignment Nodes
   - [X] Call Nodes
     - [X] Arguments
+- [X] Command line options
+- [X] include - to be deprecated for import later
+- [ ] import
 - [ ] Type Checking
 - [ ] Type inference
 - [ ] Codegen (C)
-  - [ ] Constants
+  - [X] Constants
   - [X] Variable Declaration
   - [X] Function Declaration
   - [X] Assignments
