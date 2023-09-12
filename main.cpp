@@ -284,7 +284,7 @@ struct StatementNode : Node {
 
 struct BlockNode : Node {
     Scope* scope;
-    std::vector<StatementNode*>* statements;
+    std::vector<StatementNode*> statements;
 };
 
 ExpressionNode* ast_create_expression(std::vector<Token*> tokens, bool is_args, bool is_cond, bool is_arr, int* i);
@@ -295,6 +295,9 @@ void codegen_tabs(std::ofstream* file, int tab_level);
 bool codegen_statement(StatementNode* statement, std::ofstream* file, int tab_level);
 void codegen_expr(ExpressionNode* expression, std::ofstream* file);
 std::string read_file (std::string filename);
+StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i);
+std::string ast_get_file_full_path(std::string filename);
+std::vector<StatementNode*> ast_create(std::vector<Token*> tokens);
 
 static State* global_state = NULL;
 
@@ -1248,25 +1251,11 @@ StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
     Token* current_token = next_token(tokens, i); // skip for
     int for_type = ast_create_for_determine_for(tokens, i);
     if (for_type == FOR_LOOP) {
-        //TODO: make it more generic for other types of statements
         // init statement
         // for now assuming its a var_decl but need to fix this later
-        StatementNode* init_statement = new StatementNode;
-        Token* type = current_token;
-        current_token = next_token(tokens, i);
-        expect(current_token, TK_DOUBLE_C);
-        current_token = next_token(tokens, i);
-        expect(current_token, TK_IDENTIFIER);
-        Token* id = current_token;
-        current_token = next_token(tokens, i);
-        expect(current_token, TK_ASSIGN);
-        current_token = next_token(tokens, i);
-        ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
-        VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
-        lhs->lhs->is_array = false;
-        init_statement->nt = NODE_VAR_DECL;
-        init_statement->vardecl_lhs = lhs;
-        init_statement->expr_rhs = rhs;
+        StatementNode* init_statement = ast_create_declaration(tokens, i);
+        init_statement->vardecl_lhs->lhs->is_array = false;
+        //init_statement->vardecl_lhs->lhs->is_array = false;
         for_node->init = init_statement;
 
         //TODO: skip test expression case
@@ -1345,7 +1334,47 @@ StatementNode* ast_create_if(std::vector<Token*> tokens, int* i) {
 
 BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
     log_print("Creating BlockNode\n");
-    std::vector<StatementNode*>* statements = new std::vector<StatementNode*>;
+    std::vector<StatementNode*> statements;
+    BlockNode* block = new BlockNode;
+    block->nt = NODE_BLOCK;
+    Token* current_token = tokens[*i];
+    expect(current_token, TK_CURLY_OPEN);
+    current_token = next_token(tokens, i);
+    for (; *i < tokens.size(); *(i)++) {
+        current_token = tokens[*i];
+        TokenType tt = current_token->tt;
+        if (tt == TK_CURLY_CLOSE) {
+            break;
+        }
+        if (tt == TK_NEWLINE) {
+            continue;
+        } else if (tt == TK_INCLUDE) {
+            current_token = next_token(tokens, i); // skip include
+            std::string filename = current_token->token;
+            if (global_state->include_path.size() != 0) {
+                filename = global_state->include_path + filename;
+            } else {
+                std::string dir = ast_get_file_full_path(global_state->input_filename);
+                filename = global_state->input_file_dir + dir + filename;
+            }
+            std::string src = read_file(filename.c_str());
+            auto tokens = tokenize(src);
+            auto ast = ast_create(tokens);
+            statements.insert(statements.end(), ast.begin(), ast.end());
+        } else {
+            statements.push_back(ast_create_declaration(tokens, i));
+        }
+        if (tt == TK_CURLY_CLOSE) {
+            break;
+        }
+    }
+    block->statements = statements;
+    return block;
+}
+
+BlockNode* ast_create_block_2(std::vector<Token*> tokens, int* i) {
+    log_print("Creating BlockNode\n");
+    std::vector<StatementNode*> statements;
     BlockNode* block = new BlockNode;
     block->nt = NODE_BLOCK;
     for (; *i < tokens.size(); (*i)++) {
@@ -1401,7 +1430,7 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
                 statement->nt = NODE_VAR_DECL;
                 statement->vardecl_lhs = lhs;
                 statement->expr_rhs = rhs;
-                statements->push_back(statement);
+                statements.push_back(statement);
             } else if (current_token->tt == TK_ASSIGN || current_token->tt == TK_DOT) {
                 //(*i)--;
                 *i = save;
@@ -1410,7 +1439,7 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
                 ExpressionNode* expr = ast_create_expression(tokens, false, false, false, i);
                 statement->expr_lhs = expr;
                 statement->nt = expr->nt;
-                statements->push_back(statement);
+                statements.push_back(statement);
             } else if (current_token->tt == TK_PAREN_OPEN) {
                 (*i)--;
                 current_token = tokens[*i];
@@ -1418,20 +1447,20 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
                 ExpressionNode* expr = ast_create_expression(tokens, false, false, false, i);
                 statement->expr_lhs = expr;
                 statement->nt = expr->nt;
-                statements->push_back(statement);
+                statements.push_back(statement);
             }
         } else if (current_token->tt == TK_ARROW) {
             StatementNode* statement = ast_create_return(tokens, i);
             statement->nt = NODE_RETURN;
-            statements->push_back(statement);
+            statements.push_back(statement);
         } else if (current_token->tt == TK_IF) {
             StatementNode* statement = ast_create_if(tokens, i);
             statement->nt = NODE_IF;
-            statements->push_back(statement);
+            statements.push_back(statement);
         } else if (current_token->tt == TK_FOR) {
             StatementNode* statement = ast_create_for(tokens, i);
             statement->nt = NODE_FOR;
-            statements->push_back(statement);
+            statements.push_back(statement);
         } 
     }
     block->statements = statements;
@@ -1553,15 +1582,13 @@ bool is_var_decl(std::vector<Token*> tokens, int* i) {
 }
 
 VarDeclNode* ast_handle_var_decl_lhs(std::vector<Token*> tokens, int* i) {
-    int save = *i; // save index for beginning of the line
+    //int save = *i; // save index for beginning of the line
     Token* current_token = tokens[*i];
     Token* type = current_token;
     current_token = next_token(tokens, i);
     bool is_array = false;
     int ptr_level = 0;
     ExpressionNode* arr_size = NULL; // incase the var is an array
-    // NOTE:/TODO: might be better to check if DOUBLE_C (::) is there first
-    // then proceed to either do a variable decl STATEMENT or an assignment EXPR
     if (current_token->tt == TK_SQUARE_OPEN) {
         // array type   
         is_array = true;
@@ -1599,12 +1626,13 @@ StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i) {
         TokenType tt = tokens[*i]->tt;
         int save_beg = *i; // incase its an expression
         if(tt == TK_IDENTIFIER) {
-            current_token = next_token(tokens, i);
+            //current_token = next_token(tokens, i);
             if(is_var_decl(tokens, i)) {
                 // var_decl
                 //expect(current_token, TK_IDENTIFIER);
-                expect(current_token, TK_ASSIGN);
                 VarDeclNode* lhs = ast_handle_var_decl_lhs(tokens, i);
+                current_token = tokens[*i]; // update token
+                expect(current_token, TK_ASSIGN);
                 current_token = next_token(tokens, i);
                 ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
                 lhs->rhs = rhs;
@@ -1640,6 +1668,23 @@ StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i) {
             StatementNode* stmt = new StatementNode;
             stmt->nt = NODE_TYPE;
             stmt->type_lhs = type_struct;
+            return stmt;
+        } else if (current_token->tt == TK_ARROW) {
+            StatementNode* stmt = ast_create_return(tokens, i);
+            stmt->nt = NODE_RETURN;
+            return stmt;
+        } else if (current_token->tt == TK_IF) {
+            StatementNode* stmt = ast_create_if(tokens, i);
+            stmt->nt = NODE_IF;
+            // expect(tokens[*i], TK_NEWLINE);
+            // current_token = next_token(tokens, i);
+            // expect(tokens[*i], TK_CURLY_CLOSE);
+            // current_token = next_token(tokens, i);
+            return stmt;
+        } else if (current_token->tt == TK_FOR) {
+            StatementNode* stmt = ast_create_for(tokens, i);
+            stmt->nt = NODE_FOR;
+            return stmt;
         } else {
             // Expression
             StatementNode* statement = new StatementNode;
@@ -2252,7 +2297,7 @@ void codegen_block(BlockNode* block, std::ofstream* file, int tab_level) {
     codegen_tabs(file, tab_level - 1);
     *file << "{\n";
     if (block != NULL) {
-        for (StatementNode* statement : *(block->statements)) {
+        for (StatementNode* statement : block->statements) {
             codegen_tabs(file, tab_level);
             if(codegen_statement(statement, file, tab_level)) {
                 *file << ";\n";
