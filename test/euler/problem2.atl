@@ -1,6 +1,6 @@
 include "std.atl"
 
-fib (i64 num) -> i64 {
+fn fib (i64 num) -> i64 {
     if num == 0 {
         -> 0
     } else if num == 1 {
@@ -10,7 +10,7 @@ fib (i64 num) -> i64 {
     }
 }
 
-main() -> i64 {
+fn main() -> i64 {
 
     i64 :: sum = 0
     for i64::i = 0; sum < 4000000; i = i + 1 {
@@ -19,6 +19,6 @@ main() -> i64 {
             sum = sum + res
 	}
     }
-    putint(sum)
+    puti(sum)
     -> 0
 }

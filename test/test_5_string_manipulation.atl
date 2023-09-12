@@ -1,0 +1,34 @@
+include "std.atl"
+
+fn main() -> i64 {
+    string :: test_a = "test"
+    string :: test_b = "test"
+    puts("test_a: ")
+    puts(test_a)
+    putchar('\n')
+    puts("size: "
+    puti(test_a.size)
+    putchar('\n')
+
+    puts("test_a: ")
+    puts(test_b)
+    putchar('\n')
+    puts("size: "
+    puti(test_a.size)
+    putchar('\n')
+
+    string :: test_c = ""
+    test_c = join(test_a, test_b)
+    putchar('\n')
+    puts(test_c)
+    puti(test_c.size)
+    putchar('\n')
+
+    if equal(test_a, test_b) {
+        puts("test_a and test_b are equal")
+    } else {
+        puts("test_a and test_b are not equal")
+    }
+
+    -> 0
+}

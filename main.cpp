@@ -73,6 +73,7 @@ enum TokenType {
     TK_ELSE,
     TK_FOR,
     TK_TYPE,
+    TK_FN,
     TK_PERCENT,
     TK_CHAR,
     TK_INCLUDE,
@@ -366,6 +367,8 @@ const char* get_tt_str(TokenType tt) {
         return "TK_FOR";
     } else if (tt == TK_TYPE) {
         return "TK_TYPE";
+    } else if (tt == TK_FN) {
+        return "TK_FN";
     } else if (tt == TK_PERCENT) {
         return "TK_PERCENT";
     } else if (tt == TK_CHAR) {
@@ -564,6 +567,8 @@ TokenType tokenize_get_reserved_word(std::string word) {
         return TK_TYPE;    
     } else if (word == "include") {
         return TK_INCLUDE;
+    } else if (word == "fn") {
+        return TK_FN;
     } else {
         return TK_IDENTIFIER;
     }
@@ -1443,18 +1448,205 @@ std::string ast_get_file_full_path(std::string filename) {
     return directory + '/';
 }
 
-std::vector<StatementNode*> ast_create_declaration(std::vector<Token*> tokens, int* i) {
+TypeNode* ast_create_type_struct(std::vector<Token*> tokens, int* i) {
+    TypeNode* type_node = new TypeNode;
+    Token* current_token = tokens[*i];
+    Token* type_name = current_token;
+    current_token = next_token(tokens, i);
+    expect(current_token, TK_CURLY_OPEN);
+    current_token = next_token(tokens, i);
+    expect(current_token, TK_NEWLINE);
+    for (; *i < tokens.size();) {
+        current_token = next_token(tokens, i);
+        print_token(current_token);
+        bool is_array = false;
+        int ptr_level = 0;
+        ExpressionNode* arr_size = NULL; // incase the var is an array
+        if (current_token->tt == TK_CURLY_CLOSE) {
+            current_token = next_token(tokens, i); // skip curly close
+            break;
+        }
+        expect(current_token, TK_IDENTIFIER); // type
+        Token* type = current_token;
+        current_token = next_token(tokens, i);
+        if (current_token->tt == TK_SQUARE_OPEN) {
+            // array type   
+            is_array = true;
+            ptr_level++;
+            current_token = next_token(tokens, i); // expr
+            arr_size = ast_create_expression(tokens, false, false, true, i);
+            current_token = tokens[*i]; // update current_token
+            expect(current_token, TK_SQUARE_CLOSE);
+            current_token = next_token(tokens, i); // expr
+        } else if (current_token->tt == TK_STAR) {
+            // TODO: handle deeper layers of pointers
+            while(current_token->tt == TK_STAR) {
+                ptr_level++;
+                current_token = next_token(tokens, i);
+            }
+        }
+        expect(current_token, TK_DOUBLE_C);
+        current_token = next_token(tokens, i); // name
+        Token* name = current_token;
+        VarDeclNode* var = ast_create_var_decl(get_var_type(type), type, name, NULL);
+        var->lhs->ptr_level = ptr_level;
+        var->lhs->is_array = is_array;
+        var->lhs->arr_size = arr_size;
+        type_node->name = type_name;
+        type_node->declarations.push_back(var);
+        current_token = next_token(tokens, i); // newline
+        expect(current_token, TK_NEWLINE);
+    }
+    return type_node;
+}
+
+FunctionNode* ast_create_function(std::vector<Token*> tokens, int* i) {
+    FunctionNode* ret = new FunctionNode;
+    ret->nt = NODE_FUNC;
+    // Function Name
+    Token* current_token = tokens[*i];
+    Token* name = current_token;
+    current_token = next_token(tokens, i);
+    BlockNode* block = NULL;
+    if (current_token->tt == TK_PAREN_OPEN) {
+        current_token = next_token(tokens, i);
+        auto params = ast_parse_params(tokens, i);
+        current_token = tokens[*i]; // update current_token
+
+        ret->token = name;
+        ret->params = params;
+        expect(current_token, TK_PAREN_CLOSE);
+        current_token = next_token(tokens, i);
+        if (current_token->tt == TK_ARROW) {
+            // parse return types
+            // TODO: support multiple types
+            current_token = next_token(tokens, i);
+            auto return_type = current_token;
+            ret->return_types = return_type;
+            current_token = next_token(tokens, i);
+        } else {
+            ret->return_types = NULL;
+        }
+        if (current_token->tt == TK_NEWLINE) {
+            ret->is_prototype = true;
+            // prototype
+            block = NULL;
+        } else if (current_token->tt == TK_CURLY_OPEN) {
+            ret->is_prototype = false;
+            block = ast_create_block(tokens, i);
+        }
+    }
+    ret->block = block;
+    return ret;
+}
+
+bool is_var_decl(std::vector<Token*> tokens, int* i) {
+
+    for(int j = *i; j < tokens.size(); j++) {
+        if (tokens[j]->tt == TK_DOUBLE_C) {
+            return true;
+        }
+        if (tokens[j]->tt == TK_NEWLINE) {
+            return false;
+        }
+    }
+}
+
+VarDeclNode* ast_handle_var_decl_lhs(std::vector<Token*> tokens, int* i) {
+    int save = *i; // save index for beginning of the line
+    Token* current_token = tokens[*i];
+    Token* type = current_token;
+    current_token = next_token(tokens, i);
+    bool is_array = false;
+    int ptr_level = 0;
+    ExpressionNode* arr_size = NULL; // incase the var is an array
+    // NOTE:/TODO: might be better to check if DOUBLE_C (::) is there first
+    // then proceed to either do a variable decl STATEMENT or an assignment EXPR
+    if (current_token->tt == TK_SQUARE_OPEN) {
+        // array type   
+        is_array = true;
+        ptr_level++;
+        current_token = next_token(tokens, i); // expr
+        arr_size = ast_create_expression(tokens, false, false, true, i);
+        current_token = tokens[*i]; // update current_token
+        expect(current_token, TK_SQUARE_CLOSE);
+        current_token = next_token(tokens, i); // expr
+    } else if (current_token->tt == TK_STAR) {
+        // TODO: handle deeper layers of pointers
+        while(current_token->tt == TK_STAR) {
+            ptr_level++;
+            current_token = next_token(tokens, i);
+        }
+    }
+    //Token* type = tmp;
+    expect(current_token, TK_DOUBLE_C);
+    current_token = next_token(tokens, i);
+    expect(current_token, TK_IDENTIFIER);
+    Token* id = current_token;
+    current_token = next_token(tokens, i);
+    VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, NULL);
+    lhs->lhs->ptr_level = ptr_level;
+    lhs->lhs->is_array = is_array;
+    lhs->lhs->arr_size = arr_size;
+    return lhs;
+}
+
+StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i) {
+    StatementNode* stmt = new StatementNode;
     // assume starts at the beginning of the line
     for (; *i < tokens.size(); (*i)++) {
         Token* current_token = tokens[*i];
         TokenType tt = tokens[*i]->tt;
-        int save_beg = *i;
+        int save_beg = *i; // incase its an expression
         if(tt == TK_IDENTIFIER) {
             current_token = next_token(tokens, i);
-            expect(current_token, TK_DOUBLE_C);
-            Token* type = current_token;
-            current_token = next_token(tokens, i); // skip DOUBLE_C
-
+            if(is_var_decl(tokens, i)) {
+                // var_decl
+                //expect(current_token, TK_IDENTIFIER);
+                expect(current_token, TK_ASSIGN);
+                VarDeclNode* lhs = ast_handle_var_decl_lhs(tokens, i);
+                current_token = next_token(tokens, i);
+                ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
+                lhs->rhs = rhs;
+                if (lhs->lhs->is_array && rhs->nt == NODE_SUBSCRIPT) {
+                    rhs->subscript->is_declaration = true;
+                }
+                //VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
+                StatementNode* statement = new StatementNode;
+                statement->nt = NODE_VAR_DECL;
+                statement->vardecl_lhs = lhs;
+                statement->expr_rhs = rhs;
+                return statement;
+            } else {
+                // Expression
+                StatementNode* statement = new StatementNode;
+                ExpressionNode* stmt_expr = ast_create_expression(tokens, false, false, false, i);
+                statement->nt = stmt_expr->nt;
+                statement->expr_lhs = stmt_expr;
+                return statement;
+            }
+        } else if (current_token->tt == TK_FN) {
+            // Function
+            current_token = next_token(tokens, i); // skip fn
+            FunctionNode* fn = ast_create_function(tokens, i);
+            StatementNode* stmt = new StatementNode;
+            stmt->nt = NODE_FUNC;
+            stmt->func_lhs = fn;
+            return stmt;
+        } else if (current_token->tt == TK_TYPE) {
+            // Type struct
+            current_token = next_token(tokens, i); // skip type
+            TypeNode* type_struct = ast_create_type_struct(tokens, i);
+            StatementNode* stmt = new StatementNode;
+            stmt->nt = NODE_TYPE;
+            stmt->type_lhs = type_struct;
+        } else {
+            // Expression
+            StatementNode* statement = new StatementNode;
+            ExpressionNode* stmt_expr = ast_create_expression(tokens, false, false, false, i);
+            statement->nt = stmt_expr->nt;
+            statement->expr_lhs = stmt_expr;
+            return statement;
         }
     }
 }
@@ -1466,116 +1658,23 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
     for (int i = 0; i < tokens.size(); i++) {
         Token* current_token = tokens[i];
         TokenType tt = current_token->tt;
-        if (!is_block) {
-            if (tt == TK_IDENTIFIER) {
-                //TODO: check if its reserved keyword like type/enum/etc...
-                FunctionNode* fn = new FunctionNode;
-                fn->nt = NODE_FUNC;
-                // Function Name
-                Token* name = current_token;
-                current_token = next_token(tokens, &i);
-                BlockNode* block = NULL;
-                if (current_token->tt == TK_PAREN_OPEN) {
-                    current_token = next_token(tokens, &i);
-                    auto params = ast_parse_params(tokens, &i);
-                    current_token = tokens[i]; // update current_token
-
-                    fn->token = name;
-                    fn->params = params;
-                    expect(current_token, TK_PAREN_CLOSE);
-                    current_token = next_token(tokens, &i);
-                    if (current_token->tt == TK_ARROW) {
-                        // parse return types
-                        // TODO: support multiple types
-                        current_token = next_token(tokens, &i);
-                        auto type = current_token;
-                        fn->return_types = type;
-                        current_token = next_token(tokens, &i);
-                    } else {
-                        fn->return_types = NULL;
-                    }
-                    //expect(current_token, TK_CURLY_OPEN);
-                    //block = ast_create_block(tokens, &i);
-		    if (current_token->tt == TK_NEWLINE) {
-                        fn->is_prototype = true;
-                        // prototype
-                        block = NULL;
-                    } else if (current_token->tt == TK_CURLY_OPEN) {
-                        fn->is_prototype = false;
-                        block = ast_create_block(tokens, &i);
-                    }
-                }
-                fn->block = block;
-                StatementNode* stmt = new StatementNode;
-                stmt->nt = NODE_FUNC;
-                stmt->func_lhs = fn;
-                ret.push_back(stmt);
-            } else if (tt == TK_TYPE) {
-                Token* type_name = next_token(tokens, &i);
-                current_token = next_token(tokens, &i);
-                TypeNode* type_node = new TypeNode;
-                expect(current_token, TK_CURLY_OPEN);
-                current_token = next_token(tokens, &i);
-                expect(current_token, TK_NEWLINE);
-                for (; i < tokens.size();) {
-                    current_token = next_token(tokens, &i);
-                    print_token(current_token);
-                    bool is_array = false;
-                    int ptr_level = 0;
-                    ExpressionNode* arr_size = NULL; // incase the var is an array
-                    if (current_token->tt == TK_CURLY_CLOSE) {
-                        current_token = next_token(tokens, &i); // skip curly close
-                        break;
-                    }
-                    expect(current_token, TK_IDENTIFIER); // type
-                    Token* type = current_token;
-                    current_token = next_token(tokens, &i);
-                    if (current_token->tt == TK_SQUARE_OPEN) {
-                        // array type   
-                        is_array = true;
-                        ptr_level++;
-                        current_token = next_token(tokens, &i); // expr
-                        arr_size = ast_create_expression(tokens, false, false, true, &i);
-                        current_token = tokens[i]; // update current_token
-                        expect(current_token, TK_SQUARE_CLOSE);
-                        current_token = next_token(tokens, &i); // expr
-                    } else if (current_token->tt == TK_STAR) {
-                        // TODO: handle deeper layers of pointers
-                        while(current_token->tt == TK_STAR) {
-                            ptr_level++;
-                            current_token = next_token(tokens, &i);
-                        }
-                    }
-                    expect(current_token, TK_DOUBLE_C);
-                    current_token = next_token(tokens, &i); // name
-                    Token* name = current_token;
-                    VarDeclNode* var = ast_create_var_decl(get_var_type(type), type, name, NULL);
-                    var->lhs->ptr_level = ptr_level;
-                    var->lhs->is_array = is_array;
-                    var->lhs->arr_size = arr_size;
-                    type_node->name = type_name;
-                    type_node->declarations.push_back(var);
-                    current_token = next_token(tokens, &i); // newline
-                    expect(current_token, TK_NEWLINE);
-                }
-                StatementNode* statement = new StatementNode;
-                statement->type_lhs = type_node;
-                statement->nt = NODE_TYPE;
-                ret.push_back(statement);
-            } else if (tt == TK_INCLUDE) {
-                current_token = next_token(tokens, &i);
-                std::string filename = current_token->token;
-                if (global_state->include_path.size() != 0) {
-                    filename = global_state->include_path + filename;
-                } else {
-                    std::string dir = ast_get_file_full_path(global_state->input_filename);
-                    filename = global_state->input_file_dir + dir + filename;
-                }
-                std::string src = read_file(filename.c_str());
-                auto tokens = tokenize(src);
-                auto ast = ast_create(tokens);
-                ret.insert(ret.end(), ast.begin(), ast.end());
+        if (tt == TK_NEWLINE) {
+            continue;
+        } else if (tt == TK_INCLUDE) {
+            current_token = next_token(tokens, &i); // skip include
+            std::string filename = current_token->token;
+            if (global_state->include_path.size() != 0) {
+                filename = global_state->include_path + filename;
+            } else {
+                std::string dir = ast_get_file_full_path(global_state->input_filename);
+                filename = global_state->input_file_dir + dir + filename;
             }
+            std::string src = read_file(filename.c_str());
+            auto tokens = tokenize(src);
+            auto ast = ast_create(tokens);
+            ret.insert(ret.end(), ast.begin(), ast.end());
+        } else {
+            ret.push_back(ast_create_declaration(tokens, &i));
         }
     }
     return ret;
@@ -1584,7 +1683,7 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
 void atlas_lib(std::ofstream* file) {
     *file << "#include <mimalloc.h>\n";
 
-    * file << "extern int open(const char* filename, int flags, int mode);\n";
+    *file << "extern int open(const char* filename, int flags, int mode);\n";
     
     //TODO: might not need this part lol
     *file << "#define SYSCALL_EXIT 60\n"

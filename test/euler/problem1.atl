@@ -1,6 +1,6 @@
 include "std.atl"
 
-main() -> i64 {
+fn main() -> i64 {
     i64 :: sum = 0
     for i64::i = 0; i < 10; i = i + 1 {
         if i % 3 == 0 {
@@ -9,6 +9,6 @@ main() -> i64 {
 	        sum = sum + i
         }
     }
-    putint(sum)
+    puti(sum)
     -> 0
 }

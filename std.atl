@@ -1,5 +1,45 @@
 
-putint(i64 number) {
+fn equal(string a, string b) -> bool {
+    if a.size != b.size {
+        -> false
+    } 
+    for i64::i = 0; i < a.size; i = i + 1 {
+        if a.str[i] != b.str[i] {
+            -> false
+        }
+    }
+    -> true
+}
+
+fn join(string a, string b) -> string {
+    i64 :: new_size = a.size + b.size
+    string :: ret = ""
+    free(ret.str) // probably not be necessary since it will be free(0)
+    u8* :: new_string = new(new_size * sizeof(u8))
+
+    i64 :: index = 0
+    // FIXME: can't use FOR WHILE here due to compiler bug with a.size
+    for i64::k = 0; index < a.size; index = index + 1 {
+        new_string[index] = a.str[index]
+    }
+    
+    for i64::i = 0; i < new_size; i = i + 1 {
+        new_string[index] = b.str[i]
+	index = index + 1
+    }
+
+    ret.str = new_string
+    ret.size = new_size
+    -> ret
+}
+
+fn puts(string a) {
+    for i64::i = 0; i < a.size; i = i + 1 {
+        putchar(a.str[i])
+    }
+}
+
+fn puti(i64 number) {
     i64 :: divisor = 1
 
     //TODO: make this more efficient once you can make arrays
@@ -36,4 +76,3 @@ putint(i64 number) {
         divisor = divisor / 10
     }
 }
-
