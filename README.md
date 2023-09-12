@@ -8,7 +8,7 @@ Currently you can solve some extremely basic problems, below is from problem 1 f
 // test/euler/problem1.atl
 include "std.atl"
 
-main() -> i64 {
+fn main() -> i64 {
     i64 :: sum = 0
     for i64::i = 0; i < 10; i = i + 1 {
         if i % 3 == 0 {
@@ -28,11 +28,11 @@ Below are some sample programs that have been written to encapsulate what kind o
 
 ```Rust
 // variable.atl
-test_function(int x) -> int, float {
+fn test_function(int x) -> int, float {
     -> x, x as float // -> arrow used for return, as keyword used for typecasting
 }
 
-main () {
+fn main () {
     int :: a = 69 // Variables are declared with a double colon
     // OR
     :: a = 69 // similar to Go and Rust there is type inference 
@@ -54,7 +54,7 @@ type Vector3 {
     i32 :: x, y, x
 }
 
-main () {
+fn main () {
     // Most likely the common way to instantiate variables
     :: test = Vector3 {1, 2, 3}
     // OR
