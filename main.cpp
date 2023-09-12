@@ -256,6 +256,7 @@ struct FunctionNode : Node {
     std::vector<ParamNode*> params;
     struct BlockNode* block;
     Token* return_types;
+    bool is_prototype;
 };
 
 struct ReturnNode : Node {
@@ -888,7 +889,7 @@ ExpressionNode* ast_create_char(Token* character) {
     if (character->token.size() > 1) {
         print_token(character);
         print_error_msg("Single quotes used for more than one character");
-        exit(1);
+        //exit(1);
     }
     character_node->value = character->token;
 
@@ -1091,10 +1092,6 @@ ast_create_expr_prec(
         while(get_prec(lookahead->tt) >= precedence || lookahead->tt == TK_ASSIGN) {
             current_token = next_token(tokens, i);
             Token* op = current_token; // operator is a lookahead
-            log_print("Operator: ");
-            print_token(op);
-            log_print("is_arr:");
-            std::cout << is_arr << "\n";
             if (!is_op_binary(op)) {
                 exit(50);
                 UnaryOpNode* unary_op_node = new UnaryOpNode;
@@ -1400,11 +1397,10 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
                 statement->vardecl_lhs = lhs;
                 statement->expr_rhs = rhs;
                 statements->push_back(statement);
-            } else if (current_token->tt == TK_ASSIGN) {
+            } else if (current_token->tt == TK_ASSIGN || current_token->tt == TK_DOT) {
                 //(*i)--;
                 *i = save;
                 current_token = tokens[*i];
-                std::cout << "LOOK: " << current_token->token << "\n";
                 StatementNode* statement = new StatementNode;
                 ExpressionNode* expr = ast_create_expression(tokens, false, false, false, i);
                 statement->expr_lhs = expr;
@@ -1433,9 +1429,6 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             statements->push_back(statement);
         } 
     }
-    if (tokens[*i]->tt != TK_CURLY_CLOSE) {
-        expect(tokens[*i], TK_NEWLINE);
-    }
     block->statements = statements;
     return block;
 }
@@ -1448,6 +1441,22 @@ std::string ast_get_file_full_path(std::string filename) {
         directory = filename.substr(0, last_slash_idx);
     }
     return directory + '/';
+}
+
+std::vector<StatementNode*> ast_create_declaration(std::vector<Token*> tokens, int* i) {
+    // assume starts at the beginning of the line
+    for (; *i < tokens.size(); (*i)++) {
+        Token* current_token = tokens[*i];
+        TokenType tt = tokens[*i]->tt;
+        int save_beg = *i;
+        if(tt == TK_IDENTIFIER) {
+            current_token = next_token(tokens, i);
+            expect(current_token, TK_DOUBLE_C);
+            Token* type = current_token;
+            current_token = next_token(tokens, i); // skip DOUBLE_C
+
+        }
+    }
 }
 
 std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
@@ -1485,8 +1494,16 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
                     } else {
                         fn->return_types = NULL;
                     }
-                    expect(current_token, TK_CURLY_OPEN);
-                    block = ast_create_block(tokens, &i);
+                    //expect(current_token, TK_CURLY_OPEN);
+                    //block = ast_create_block(tokens, &i);
+		    if (current_token->tt == TK_NEWLINE) {
+                        fn->is_prototype = true;
+                        // prototype
+                        block = NULL;
+                    } else if (current_token->tt == TK_CURLY_OPEN) {
+                        fn->is_prototype = false;
+                        block = ast_create_block(tokens, &i);
+                    }
                 }
                 fn->block = block;
                 StatementNode* stmt = new StatementNode;
@@ -1494,7 +1511,7 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
                 stmt->func_lhs = fn;
                 ret.push_back(stmt);
             } else if (tt == TK_TYPE) {
-                Token* name = next_token(tokens, &i);
+                Token* type_name = next_token(tokens, &i);
                 current_token = next_token(tokens, &i);
                 TypeNode* type_node = new TypeNode;
                 expect(current_token, TK_CURLY_OPEN);
@@ -1503,6 +1520,9 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
                 for (; i < tokens.size();) {
                     current_token = next_token(tokens, &i);
                     print_token(current_token);
+                    bool is_array = false;
+                    int ptr_level = 0;
+                    ExpressionNode* arr_size = NULL; // incase the var is an array
                     if (current_token->tt == TK_CURLY_CLOSE) {
                         current_token = next_token(tokens, &i); // skip curly close
                         break;
@@ -1510,11 +1530,30 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
                     expect(current_token, TK_IDENTIFIER); // type
                     Token* type = current_token;
                     current_token = next_token(tokens, &i);
+                    if (current_token->tt == TK_SQUARE_OPEN) {
+                        // array type   
+                        is_array = true;
+                        ptr_level++;
+                        current_token = next_token(tokens, &i); // expr
+                        arr_size = ast_create_expression(tokens, false, false, true, &i);
+                        current_token = tokens[i]; // update current_token
+                        expect(current_token, TK_SQUARE_CLOSE);
+                        current_token = next_token(tokens, &i); // expr
+                    } else if (current_token->tt == TK_STAR) {
+                        // TODO: handle deeper layers of pointers
+                        while(current_token->tt == TK_STAR) {
+                            ptr_level++;
+                            current_token = next_token(tokens, &i);
+                        }
+                    }
                     expect(current_token, TK_DOUBLE_C);
                     current_token = next_token(tokens, &i); // name
                     Token* name = current_token;
                     VarDeclNode* var = ast_create_var_decl(get_var_type(type), type, name, NULL);
-                    type_node->name = name;
+                    var->lhs->ptr_level = ptr_level;
+                    var->lhs->is_array = is_array;
+                    var->lhs->arr_size = arr_size;
+                    type_node->name = type_name;
                     type_node->declarations.push_back(var);
                     current_token = next_token(tokens, &i); // newline
                     expect(current_token, TK_NEWLINE);
@@ -1544,6 +1583,9 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
 
 void atlas_lib(std::ofstream* file) {
     *file << "#include <mimalloc.h>\n";
+
+    * file << "extern int open(const char* filename, int flags, int mode);\n";
+    
     //TODO: might not need this part lol
     *file << "#define SYSCALL_EXIT 60\n"
           << "#define SYSCALL_WRITE 1\n"
@@ -1842,8 +1884,12 @@ void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
         } else {
             *file << expression->call_node->name->token << "("; 
         }
-        for (auto arg : expression->call_node->args) {
-            codegen_expr(arg, file);
+        auto args = expression->call_node->args;
+        for (int i = 0; i < args.size(); i++) {
+            codegen_expr(args[i], file);
+            if (i < args.size() - 1) {
+                *file << ", ";
+            }
         }
         *file << ")";
         break;
@@ -1904,6 +1950,8 @@ std::string codegen_get_c_type(Token* atlas_type) {
         //exit(1);
     } else if (atlas_type->token == "string") {
         return "AtlasTypeString";
+    } else if (atlas_type->token == "bool") {
+        return "bool";
     }
     std::string err = "The \"" + atlas_type->token + "\" type is not supported";
     print_error_msg(err);
@@ -2087,7 +2135,11 @@ void codegen_func(FunctionNode* func, std::ofstream* file) {
         *file << "void";
     }
     *file << ")\n";
-    codegen_block(func->block, file, 1);
+    if(func->block != NULL) {
+        codegen_block(func->block, file, 1);
+    } else {
+        *file << ";";
+    }
     *file << "\n";
 }
 
@@ -2198,7 +2250,7 @@ State* set_options(int argc, char** argv) {
         }
     }
     if (!filepath_set) {
-        std::cout << "atlas: " << CL_RED << "error:" << CL_RESET <<" no input files";
+        std::cout << "atlas: " << CL_RED << "error:" << CL_RESET <<" no input files\n";
         exit(1);
     }
     return state;    
@@ -2237,7 +2289,6 @@ int main(int argc, char** argv) {
     } else {
         BACKEND = "gcc";
     }
-
 
     std::string src = read_file(state->input_filename);
     log_print(src + "\n");
