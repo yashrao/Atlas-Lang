@@ -256,8 +256,8 @@ struct AssignNode : Node {
     ExpressionNode* rhs;
 };
 
-struct ParamNode : Node {
-    Token* type;
+struct ParamNode : VarNode {
+    // TODO: maybe get rid of this?
 };
 
 struct FunctionNode : Node {
@@ -305,6 +305,8 @@ std::string read_file (std::string filename);
 StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i);
 std::string ast_get_file_full_path(std::string filename);
 std::vector<StatementNode*> ast_create(std::vector<Token*> tokens);
+VarType get_var_type(Token* var_type);
+std::string codegen_get_c_type(Token* atlas_type);
 
 static State* global_state = NULL;
 
@@ -616,7 +618,7 @@ std::vector<Token*> tokenize (std::string src) {
                     line++;
                 }
         }
-        if (isalnum(c)) {
+        if (isalnum(c) || c == '_') {
             current_token_string += c;
             prev_delim = false;
         } else if(is_delim(c)) {
@@ -765,11 +767,21 @@ void print_nodes(std::vector<Node*> nodes) {
     }
 }
 
-ParamNode* ast_create_param(Token* type, Token* name) {
+ParamNode* ast_create_param(Token* type,
+                            Token* name,
+                            bool is_array,
+                            int ptr_level,
+                            ExpressionNode* arr_size)
+{
     ParamNode* ret = new ParamNode;
     ret->nt = NODE_PARAM;
     ret->token = name;
-    ret->type = type;
+    ret->identifier = name;
+    ret->type = get_var_type(type);
+    ret->type_ = type;
+    ret->is_array = is_array;
+    ret->ptr_level = ptr_level;
+    ret->arr_size = arr_size;
     return ret;
 }
 
@@ -778,25 +790,44 @@ Token* next_token(std::vector<Token*> tokens, int* i) {
     return tokens[*i];
 }
 
-std::vector<ParamNode*> ast_parse_params(std::vector<Token*> tokens, int* index) {
+std::vector<ParamNode*> ast_parse_params(std::vector<Token*> tokens, int* i) {
     std::vector<ParamNode*> params;
-    Token* current_token = tokens[*index];
+    Token* current_token = tokens[*i];
     while (current_token->tt != TK_PAREN_CLOSE) {
         expect(current_token, TK_IDENTIFIER);
         Token* type = current_token;
-        current_token = next_token(tokens, index);
-
+        current_token = next_token(tokens, i);
+        bool is_array = false;
+        int ptr_level = 0;
+        ExpressionNode* arr_size = NULL; // incase the var is an array
+        if (current_token->tt == TK_SQUARE_OPEN) {
+            // array type   
+            is_array = true;
+            ptr_level++;
+            current_token = next_token(tokens, i); // expr
+            arr_size = ast_create_expression(tokens, false, false, true, i);
+            current_token = tokens[*i]; // update current_token
+            expect(current_token, TK_SQUARE_CLOSE);
+            current_token = next_token(tokens, i); // expr
+        } else if (current_token->tt == TK_STAR) {
+            // TODO: handle deeper layers of pointers
+            while(current_token->tt == TK_STAR) {
+                ptr_level++;
+                current_token = next_token(tokens, i);
+            }
+        }
         expect(current_token, TK_IDENTIFIER);
         Token* name = current_token;
-        current_token = next_token(tokens, index);
-        params.push_back(ast_create_param(type, name));
-        
+        current_token = next_token(tokens, i);
+        ParamNode* param = ast_create_param(type, name, is_array, ptr_level,
+                                            arr_size);
+        params.push_back(param);
         if (current_token->tt == TK_COMMA) {
-            current_token = next_token(tokens, index); // skip the comma
+            current_token = next_token(tokens, i); // skip the comma
         } else if (current_token->tt == TK_PAREN_CLOSE) {
             break;
         }
-        if (*index == tokens.size()) {
+        if (*i == tokens.size()) {
             break;
         }
     }
@@ -1040,10 +1071,15 @@ ExpressionNode* ast_create_type_instantiation(std::vector<Token*> tokens, int* i
                                                               false,
                                                               true, // not sure if it should be true or false
                                                             i));
-            //current_token = tokens[*i];
-            //Token* lookahead = ast_get_lookahead(tokens, i);
+            current_token = tokens[*i];
+            Token* lookahead = ast_get_lookahead(tokens, i);
+            if (lookahead->tt == TK_CURLY_CLOSE) {
+                (*i)++;
+                break;
+            }
         }
     }
+    log_print("type_instantiation end\n");
     ret->nt = NODE_TYPE_INST;
     type_inst->nt = NODE_TYPE_INST;
     ret->type_inst = type_inst;
@@ -1138,6 +1174,9 @@ ast_create_expr_prec(
 
     if (current_token->tt != TK_NEWLINE && lookahead->tt != TK_CURLY_OPEN) {
         // FIX to make the second half of OR check if lookahead operator has different associativity
+        if (lookahead->tt == TK_CURLY_CLOSE) {
+            return lhs;
+        }
         while(get_prec(lookahead->tt) >= precedence || lookahead->tt == TK_ASSIGN) {
             current_token = next_token(tokens, i);
             Token* op = current_token; // operator is a lookahead
@@ -1699,21 +1738,6 @@ void atlas_lib(std::ofstream* file) {
 
     *file << "\n";
 
-    *file << "typedef struct AtlasTypeString {\n"
-          << "    char* str;\n"
-          << "    uint64 size;\n"
-          << "} AtlasTypeString;\n";
-
-    *file << "\n";
-    *file << "AtlasTypeString atlas_create_string(char* str, uint64 size) {\n"
-          << "    char* _1 = mi_malloc(size * sizeof(char));\n"
-          << "    for (int i = 0; i < size; i++) {\n"
-          << "        _1[i] = str[i];\n"
-          << "    }\n"
-          << "    return (AtlasTypeString){_1, size};\n"
-          << "}\n";
-    *file << "\n";
-
     *file << "void atlas_exit(int exit_code)\n"
           << "{\n"
           << "\tasm volatile\n"
@@ -1823,7 +1847,7 @@ void codegen_array_expr(ArrayNode* array, std::ofstream* file) {
 std::string codegen_get_intrinsic_name(std::string name) {
     if (name == "putchar") {
         return "atlas_putchar";
-    } else if (name == "new") {
+    } else if (name == "alloc") {
         return "mi_malloc";
     } else if (name == "free") {
         return "mi_free";
@@ -1831,6 +1855,8 @@ std::string codegen_get_intrinsic_name(std::string name) {
         return "sizeof";
     } else if (name == "exit") {
         return "atlas_exit";
+    } else if (name == "new") {
+        return "new"; // TODO: implement
     } else {
         std::string err = "\"" + name + "\"" + " intrinsic has not been defined\n";
         print_error_msg(err);
@@ -1889,7 +1915,7 @@ std::string codegen_get_c_intrinsic_type(Token* atlas_type) {
 bool codegen_is_intrinsic_function(std::string call_name) {
     if (call_name == "putchar") {
         return true;
-    } else if (call_name == "new") {
+    } else if (call_name == "alloc") {
         return true;
     } else if (call_name == "free") {
         return true;
@@ -1938,7 +1964,21 @@ void codegen_subscript(SubscriptNode* subscript, std::ofstream* file) {
     }
 }
 
+void codegen_type_inst(TypeInstNode* type_inst, std::ofstream* file) {
+    *file << "{";
+    for (int i = 0; i < type_inst->values.size(); i++) {
+        ExpressionNode* value = type_inst->values[i];
+        codegen_expr(value, file);
+        if (i == type_inst->values.size() - 1) {
+            break;
+        }
+        *file << ", ";
+    }
+    *file << "}";
+}
+
 void codegen_unary_op(UnaryOpNode* unary_op, std::ofstream* file) {
+    //TODO: old code?
     std::string str;
     switch(unary_op->operator_type) {
     case NODE_SUBSCRIPT:
@@ -2011,7 +2051,11 @@ void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
         codegen_subscript(expression->subscript, file);
         break;
     case NODE_UNARY:
+        //TODO:
         codegen_unary_op(expression->unary_op, file);
+        break;
+    case NODE_TYPE_INST:
+        codegen_type_inst(expression->type_inst, file);
         break;
     default:
         std::string err = "CODEGEN EXPR " + get_nt_str(expression->nt) + "\n";
@@ -2043,7 +2087,8 @@ std::string codegen_get_c_type(Token* atlas_type) {
         //print_error_msg("\"u8\" IS NOT SUPPORTED");
         //exit(1);
     } else if (atlas_type->token == "string") {
-        return "AtlasTypeString";
+        //return "AtlasTypeString";
+        return "string";
     } else if (atlas_type->token == "bool") {
         return "bool";
     }
@@ -2082,7 +2127,7 @@ void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
     if (codegen_is_c_type(var_decl->lhs->type_)) {
         *file << codegen_get_c_type(var_decl->lhs->type_);
     } else if (var_decl->lhs->type_->token == "string") {
-        *file << "AtlasTypeString";
+        *file << "string"; // TODO:
     } else {
         *file << var_decl->lhs->type_->token;
     }
@@ -2104,6 +2149,30 @@ void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
     if (var_decl->rhs != NULL) {
         *file << " = ";
         codegen_expr(var_decl->rhs, file);
+    }
+}
+
+void codegen_param(ParamNode* param, std::ofstream* file) {
+    // lhs
+    if (codegen_is_c_type(param->type_)) {
+        *file << codegen_get_c_type(param->type_);
+    } else if (param->type_->token == "string") {
+        *file << "string"; // TODO:
+    } else {
+        *file << param->type_->token;
+    }
+
+    for (int i = 0; i < param->ptr_level; i++) {
+        *file << "*";
+    }
+
+    *file << " " << param->identifier->token;
+
+    print_token(param->identifier);
+    if (param->is_array == true) {
+        *file << "[";
+        codegen_expr(param->arr_size, file);
+        *file << "]";
     }
 }
 
@@ -2217,12 +2286,10 @@ void codegen_func(FunctionNode* func, std::ofstream* file) {
     *file << func->token->token << "(";
     bool add_comma = true;
     // Args
-    for (ParamNode* param : func->params) {
-        *file << codegen_get_c_type(param->type) << " ";
-        *file << param->token->token;
-        if (func->params.size() > 1 && add_comma) {
+    for (int i = 0; i < func->params.size(); i++) {
+        codegen_param(func->params[i], file);
+        if (i + 1 != func->params.size()) {
             *file << ", ";
-            add_comma = false;
         }
     }
     if (func->params.size() == 0) {

@@ -1,4 +1,28 @@
 
+type string {
+    u8* :: str
+    u64 :: size
+}
+
+fn strlen(u8* str) -> u64 {
+    u64 :: len = 0
+    for i64:: i = 0; i < len; i = i + 1 {
+        len = len + 1
+    }
+}
+
+fn atlas_create_string(u8* str, u64 size) -> string {
+    // u64 :: size = strlen(str) // compiler adds this for now
+    u8* :: new_str = alloc(size * sizeof(u8))
+
+    for i64::i = 0; i < size; i = i + 1 {
+        new_str[i] = str[i]
+    }
+
+    string :: ret = .{new_str, size}
+    -> ret
+}
+
 fn equal(string a, string b) -> bool {
     if a.size != b.size {
         -> false
@@ -15,7 +39,7 @@ fn join(string a, string b) -> string {
     i64 :: new_size = a.size + b.size
     string :: ret = ""
     free(ret.str) // probably not be necessary since it will be free(0)
-    u8* :: new_string = new(new_size * sizeof(u8))
+    u8* :: new_string = alloc(new_size * sizeof(u8))
 
     i64 :: index = 0
     // FIXME: can't use FOR WHILE here due to compiler bug with a.size
@@ -25,7 +49,7 @@ fn join(string a, string b) -> string {
     
     for i64::i = 0; i < new_size; i = i + 1 {
         new_string[index] = b.str[i]
-	index = index + 1
+        index = index + 1
     }
 
     ret.str = new_string
