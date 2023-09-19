@@ -1718,6 +1718,7 @@ void atlas_lib(std::ofstream* file) {
     *file << "#include <mimalloc.h>\n";
 
     *file << "extern int open(const char* filename, int flags, int mode);\n";
+    *file << "extern int close(int fileds);\n";
     
     //TODO: might not need this part lol
     *file << "#define SYSCALL_EXIT 60\n"
@@ -1851,6 +1852,10 @@ std::string codegen_get_intrinsic_name(std::string name) {
         return "mi_malloc";
     } else if (name == "free") {
         return "mi_free";
+    } else if (name == "open") {
+        return "open";
+    } else if (name == "close") {
+        return "close";
     } else if (name == "sizeof") {
         return "sizeof";
     } else if (name == "exit") {
@@ -1914,6 +1919,10 @@ std::string codegen_get_c_intrinsic_type(Token* atlas_type) {
 
 bool codegen_is_intrinsic_function(std::string call_name) {
     if (call_name == "putchar") {
+        return true;
+    } else if (call_name == "open") {
+        return true;
+    } else if (call_name == "close") {
         return true;
     } else if (call_name == "alloc") {
         return true;

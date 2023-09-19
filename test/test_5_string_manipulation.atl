@@ -7,21 +7,21 @@ fn main() -> i64 {
     puts(test_a)
     putchar('\n')
     puts("size: "
-    puti(test_a.size)
+    puti(test_a.len)
     putchar('\n')
 
     puts("test_a: ")
     puts(test_b)
     putchar('\n')
     puts("size: "
-    puti(test_a.size)
+    puti(test_a.len)
     putchar('\n')
 
     string :: test_c = ""
     test_c = join(test_a, test_b)
     putchar('\n')
     puts(test_c)
-    puti(test_c.size)
+    puti(test_c.len)
     putchar('\n')
 
     if equal(test_a, test_b) {

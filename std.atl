@@ -1,8 +1,16 @@
 
+//#define O_RDONLY        00000000
+//#define O_CREAT         00000100
+//#define O_TRUNC         00001000
+
 type string {
     u8* :: str
-    u64 :: size
+    u64 :: len
 }
+
+u64 :: O_RDONLY = 0
+u64 :: O_CREATE = 4
+u64 :: O_TRUNC  = 16
 
 fn strlen(u8* str) -> u64 {
     u64 :: len = 0
@@ -11,23 +19,25 @@ fn strlen(u8* str) -> u64 {
     }
 }
 
-fn atlas_create_string(u8* str, u64 size) -> string {
+fn atlas_create_string(u8* str, u64 len) -> string {
     // u64 :: size = strlen(str) // compiler adds this for now
-    u8* :: new_str = alloc(size * sizeof(u8))
-
-    for i64::i = 0; i < size; i = i + 1 {
-        new_str[i] = str[i]
+    u8* :: new_str = alloc(len * sizeof(u8) + 1)
+    i64 :: index = 0
+    for index < len {
+        new_str[index] = str[index]
+        index = index + 1
     }
+    new_str[index] = '\0'
 
-    string :: ret = .{new_str, size}
+    string :: ret = .{new_str, len}
     -> ret
 }
 
 fn equal(string a, string b) -> bool {
-    if a.size != b.size {
+    if a.len != b.len {
         -> false
     } 
-    for i64::i = 0; i < a.size; i = i + 1 {
+    for i64::i = 0; i < a.len; i = i + 1 {
         if a.str[i] != b.str[i] {
             -> false
         }
@@ -36,14 +46,14 @@ fn equal(string a, string b) -> bool {
 }
 
 fn join(string a, string b) -> string {
-    i64 :: new_size = a.size + b.size
+    i64 :: new_size = a.len + b.len
     string :: ret = ""
     free(ret.str) // probably not be necessary since it will be free(0)
     u8* :: new_string = alloc(new_size * sizeof(u8))
 
     i64 :: index = 0
-    // FIXME: can't use FOR WHILE here due to compiler bug with a.size
-    for i64::k = 0; index < a.size; index = index + 1 {
+    // FIXME: can't use FOR WHILE here due to compiler bug with a.len
+    for i64::k = 0; index < a.len; index = index + 1 {
         new_string[index] = a.str[index]
     }
     
@@ -53,12 +63,12 @@ fn join(string a, string b) -> string {
     }
 
     ret.str = new_string
-    ret.size = new_size
+    ret.len = new_size
     -> ret
 }
 
 fn puts(string a) {
-    for i64::i = 0; i < a.size; i = i + 1 {
+    for i64::i = 0; i < a.len; i = i + 1 {
         putchar(a.str[i])
     }
 }
