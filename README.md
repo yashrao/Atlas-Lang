@@ -4,13 +4,13 @@ Atlas is aimed to be a statically typed compiled language and is aimed to be ver
 
 ## What works now?
 Currently you can solve some extremely basic problems, below is from problem 1 from Project Euler.
-```rust
+```odin
 // test/euler/problem1.atl
 include "std.atl"
 
-fn main() -> i64 {
-    i64 :: sum = 0
-    for i64::i = 0; i < 10; i = i + 1 {
+main fn() -> i64 {
+    :: sum i64 = 0
+    for :: i i64 = 0; i < 10; i = i + 1 {
         if i % 3 == 0 {
 	        sum = sum + i
 	    } else if i % 5 == 0 {
@@ -26,14 +26,14 @@ fn main() -> i64 {
 ## Planned Design
 Below are some sample programs that have been written to encapsulate what kind of syntax Atlas will have with a full set of features (Note: this is just a proof of concept, see below for what works currently):
 
-```Rust
+```odin
 // variable.atl
-fn test_function(int x) -> int, float {
-    -> x, x as float // -> arrow used for return, as keyword used for typecasting
+test_function fn(x i32) -> i32, f32 {
+    -> x, x as f32 // -> arrow used for return, as keyword used for typecasting
 }
 
-fn main () {
-    int :: a = 69 // Variables are declared with a double colon
+main fn() {
+    :: a i64 = 69 // Variables are declared with a double colon
     // OR
     :: a = 69 // similar to Go and Rust there is type inference 
     a = 70 // variable assignment is the same as expected
@@ -42,25 +42,25 @@ fn main () {
 }
 ```
 
-```Rust
+```odin
 // vector.atl
-type Vector3 {
-    i32 :: x
-    i32 :: y
-    i32 :: z
+Vector3 type {
+    x i32
+    y i32
+    z i32
 }
 // OR
-type Vector3 {
-    i32 :: x, y, x
+Vector3 type {
+    x, y, x i32
 }
 
-fn main () {
+main fn() {
     // Most likely the common way to instantiate variables
     :: test = Vector3 {1, 2, 3}
     // OR
-    Vector3 :: test = Vector3 {1, 2, 3}
+    :: test Vector3 = Vector3 {1, 2, 3}
     // OR
-    Vector3 :: test
+    :: test Vector3
     test.x = 1
     test.y = 2
     test.z = 3
