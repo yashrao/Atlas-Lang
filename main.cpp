@@ -795,7 +795,7 @@ std::vector<ParamNode*> ast_parse_params(std::vector<Token*> tokens, int* i) {
     Token* current_token = tokens[*i];
     while (current_token->tt != TK_PAREN_CLOSE) {
         expect(current_token, TK_IDENTIFIER);
-        Token* type = current_token;
+        Token* name = current_token;
         current_token = next_token(tokens, i);
         bool is_array = false;
         int ptr_level = 0;
@@ -817,8 +817,10 @@ std::vector<ParamNode*> ast_parse_params(std::vector<Token*> tokens, int* i) {
             }
         }
         expect(current_token, TK_IDENTIFIER);
-        Token* name = current_token;
+        Token* type = current_token;
         current_token = next_token(tokens, i);
+        //Token* name = current_token;
+        //current_token = next_token(tokens, i);
         ParamNode* param = ast_create_param(type, name, is_array, ptr_level,
                                             arr_size);
         params.push_back(param);
@@ -1329,6 +1331,7 @@ StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
     ForNode* for_node = new ForNode;
 
     Token* current_token = next_token(tokens, i); // skip for
+    print_token(current_token);
     int for_type = ast_create_for_determine_for(tokens, i);
     if (for_type == FOR_LOOP) {
         // init statement
@@ -1344,6 +1347,7 @@ StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
         expect(current_token, TK_NEWLINE);
         current_token = next_token(tokens, i); // skip NEWLINE
         ExpressionNode* test_expr = ast_create_expression(tokens, false, false, false, i);
+        current_token = tokens[*i];
         if (tokens[*i]->tt == TK_NEWLINE) {
             current_token = tokens[*i];
         } else {
@@ -1371,6 +1375,7 @@ StatementNode* ast_create_for(std::vector<Token*> tokens, int* i) {
     }
 
     // block
+    current_token = tokens[*i];
     current_token = next_token(tokens, i);
     expect(current_token, TK_CURLY_OPEN);
     BlockNode* for_block = ast_create_block(tokens, i);
@@ -1471,6 +1476,8 @@ TypeNode* ast_create_type_struct(std::vector<Token*> tokens, int* i) {
     Token* current_token = tokens[*i];
     Token* type_name = current_token;
     current_token = next_token(tokens, i);
+    expect(current_token, TK_TYPE); // type keyword
+    current_token = next_token(tokens, i);
     expect(current_token, TK_CURLY_OPEN);
     current_token = next_token(tokens, i);
     expect(current_token, TK_NEWLINE);
@@ -1485,7 +1492,7 @@ TypeNode* ast_create_type_struct(std::vector<Token*> tokens, int* i) {
             break;
         }
         expect(current_token, TK_IDENTIFIER); // type
-        Token* type = current_token;
+        Token* name = current_token;
         current_token = next_token(tokens, i);
         if (current_token->tt == TK_SQUARE_OPEN) {
             // array type   
@@ -1503,9 +1510,7 @@ TypeNode* ast_create_type_struct(std::vector<Token*> tokens, int* i) {
                 current_token = next_token(tokens, i);
             }
         }
-        expect(current_token, TK_DOUBLE_C);
-        current_token = next_token(tokens, i); // name
-        Token* name = current_token;
+        Token* type = current_token;
         VarDeclNode* var = ast_create_var_decl(get_var_type(type), type, name, NULL);
         var->lhs->ptr_level = ptr_level;
         var->lhs->is_array = is_array;
@@ -1520,11 +1525,15 @@ TypeNode* ast_create_type_struct(std::vector<Token*> tokens, int* i) {
 
 FunctionNode* ast_create_function(std::vector<Token*> tokens, int* i) {
     FunctionNode* ret = new FunctionNode;
-    ret->nt = NODE_FUNC;
-    // Function Name
+
+    // start with name
     Token* current_token = tokens[*i];
     Token* name = current_token;
+    ret->nt = NODE_FUNC;
     current_token = next_token(tokens, i);
+    expect(current_token, TK_FN); 
+    current_token = next_token(tokens, i); // skip fn
+    
     BlockNode* block = NULL;
     if (current_token->tt == TK_PAREN_OPEN) {
         current_token = next_token(tokens, i);
@@ -1573,11 +1582,14 @@ bool is_var_decl(std::vector<Token*> tokens, int* i) {
 VarDeclNode* ast_handle_var_decl_lhs(std::vector<Token*> tokens, int* i) {
     //int save = *i; // save index for beginning of the line
     Token* current_token = tokens[*i];
-    Token* type = current_token;
-    current_token = next_token(tokens, i);
+    expect(current_token, TK_DOUBLE_C);
+    current_token = next_token(tokens, i); // skip DOUBLE_C
+    Token* id = current_token;
+    expect(current_token, TK_IDENTIFIER);
     bool is_array = false;
     int ptr_level = 0;
     ExpressionNode* arr_size = NULL; // incase the var is an array
+    current_token = next_token(tokens, i); // skip DOUBLE_C
     if (current_token->tt == TK_SQUARE_OPEN) {
         // array type   
         is_array = true;
@@ -1594,11 +1606,8 @@ VarDeclNode* ast_handle_var_decl_lhs(std::vector<Token*> tokens, int* i) {
             current_token = next_token(tokens, i);
         }
     }
-    //Token* type = tmp;
-    expect(current_token, TK_DOUBLE_C);
-    current_token = next_token(tokens, i);
     expect(current_token, TK_IDENTIFIER);
-    Token* id = current_token;
+    Token* type = current_token;
     current_token = next_token(tokens, i);
     VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, NULL);
     lhs->lhs->ptr_level = ptr_level;
@@ -1614,50 +1623,53 @@ StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i) {
         Token* current_token = tokens[*i];
         TokenType tt = tokens[*i]->tt;
         int save_beg = *i; // incase its an expression
-        if(tt == TK_IDENTIFIER) {
-            //current_token = next_token(tokens, i);
-            if(is_var_decl(tokens, i)) {
-                // var_decl
-                //expect(current_token, TK_IDENTIFIER);
-                VarDeclNode* lhs = ast_handle_var_decl_lhs(tokens, i);
-                current_token = tokens[*i]; // update token
-                expect(current_token, TK_ASSIGN);
-                current_token = next_token(tokens, i);
-                ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
-                lhs->rhs = rhs;
-                if (lhs->lhs->is_array && rhs->nt == NODE_SUBSCRIPT) {
-                    rhs->subscript->is_declaration = true;
-                }
-                //VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
-                StatementNode* statement = new StatementNode;
-                statement->nt = NODE_VAR_DECL;
-                statement->vardecl_lhs = lhs;
-                statement->expr_rhs = rhs;
-                return statement;
+        if(tt == TK_DOUBLE_C) {
+            // var_decl
+            if (tokens[*i - 1]->tt == TK_FOR) {
+                //exit(50);
+            }
+            //expect(current_token, TK_IDENTIFIER);
+            VarDeclNode* lhs = ast_handle_var_decl_lhs(tokens, i);
+            current_token = tokens[*i]; // update token
+            expect(current_token, TK_ASSIGN);
+            current_token = next_token(tokens, i);
+            ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
+            lhs->rhs = rhs;
+            if (lhs->lhs->is_array && rhs->nt == NODE_SUBSCRIPT) {
+                rhs->subscript->is_declaration = true;
+            }
+            //VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
+            StatementNode* statement = new StatementNode;
+            statement->nt = NODE_VAR_DECL;
+            statement->vardecl_lhs = lhs;
+            statement->expr_rhs = rhs;
+            return statement;
+        } else if (current_token->tt == TK_IDENTIFIER) {
+            Token* lookahead = ast_get_lookahead(tokens, i);
+            if (lookahead->tt == TK_FN) {
+                // Function
+                FunctionNode* fn = ast_create_function(tokens, i);
+                StatementNode* stmt = new StatementNode;
+                stmt->nt = NODE_FUNC;
+                stmt->func_lhs = fn;
+                return stmt;
+            } else if (lookahead->tt == TK_TYPE) {
+                // Type struct
+                //TODO
+                TypeNode* type_struct = ast_create_type_struct(tokens, i);
+                StatementNode* stmt = new StatementNode;
+                stmt->nt = NODE_TYPE;
+                stmt->type_lhs = type_struct;
+                return stmt;
             } else {
                 // Expression
+                // TODO: probably need to fix this later
                 StatementNode* statement = new StatementNode;
                 ExpressionNode* stmt_expr = ast_create_expression(tokens, false, false, false, i);
                 statement->nt = stmt_expr->nt;
                 statement->expr_lhs = stmt_expr;
                 return statement;
             }
-        } else if (current_token->tt == TK_FN) {
-            // Function
-            current_token = next_token(tokens, i); // skip fn
-            FunctionNode* fn = ast_create_function(tokens, i);
-            StatementNode* stmt = new StatementNode;
-            stmt->nt = NODE_FUNC;
-            stmt->func_lhs = fn;
-            return stmt;
-        } else if (current_token->tt == TK_TYPE) {
-            // Type struct
-            current_token = next_token(tokens, i); // skip type
-            TypeNode* type_struct = ast_create_type_struct(tokens, i);
-            StatementNode* stmt = new StatementNode;
-            stmt->nt = NODE_TYPE;
-            stmt->type_lhs = type_struct;
-            return stmt;
         } else if (current_token->tt == TK_ARROW) {
             StatementNode* stmt = ast_create_return(tokens, i);
             stmt->nt = NODE_RETURN;
@@ -1671,6 +1683,7 @@ StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i) {
             // current_token = next_token(tokens, i);
             return stmt;
         } else if (current_token->tt == TK_FOR) {
+            //TODO:
             StatementNode* stmt = ast_create_for(tokens, i);
             stmt->nt = NODE_FOR;
             return stmt;

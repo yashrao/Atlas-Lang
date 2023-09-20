@@ -1,6 +1,5 @@
 include "std.atl"
 
-fn main() -> i64 {
+main fn() -> i64 {
     puts("Hello, World!")
-    -> 0
 }

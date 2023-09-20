@@ -3,41 +3,41 @@
 //#define O_CREAT         00000100
 //#define O_TRUNC         00001000
 
-type string {
-    u8* :: str
-    u64 :: len
+string type {
+    str *u8
+    len u64
 }
 
-u64 :: O_RDONLY = 0
-u64 :: O_CREATE = 4
-u64 :: O_TRUNC  = 16
+:: O_RDONLY u64 = 0
+:: O_CREATE u64 = 4
+:: O_TRUNC  u64 = 16
 
-fn strlen(u8* str) -> u64 {
-    u64 :: len = 0
-    for i64:: i = 0; i < len; i = i + 1 {
+strlen fn(str *u8) -> u64 {
+    :: len u64 = 0
+    for ::i i64 = 0; i < len; i = i + 1 {
         len = len + 1
     }
 }
 
-fn atlas_create_string(u8* str, u64 len) -> string {
-    // u64 :: size = strlen(str) // compiler adds this for now
-    u8* :: new_str = alloc(len * sizeof(u8) + 1)
-    i64 :: index = 0
+atlas_create_string fn(str *u8, len u64) -> string {
+    // :: size u64 = strlen(str) // compiler adds this for now
+    :: new_str *u8 = alloc(len * sizeof(u8) + 1)
+    :: index i64 = 0
     for index < len {
         new_str[index] = str[index]
         index = index + 1
     }
     new_str[index] = '\0'
 
-    string :: ret = .{new_str, len}
+    :: ret string = .{new_str, len}
     -> ret
 }
 
-fn equal(string a, string b) -> bool {
+equal fn(a string, b string) -> bool {
     if a.len != b.len {
         -> false
     } 
-    for i64::i = 0; i < a.len; i = i + 1 {
+    for ::i i64 = 0; i < a.len; i = i + 1 {
         if a.str[i] != b.str[i] {
             -> false
         }
@@ -45,19 +45,19 @@ fn equal(string a, string b) -> bool {
     -> true
 }
 
-fn join(string a, string b) -> string {
-    i64 :: new_size = a.len + b.len
-    string :: ret = ""
+join fn(a string, b string) -> string {
+    :: new_size i64 = a.len + b.len
+    :: ret string = ""
     free(ret.str) // probably not be necessary since it will be free(0)
-    u8* :: new_string = alloc(new_size * sizeof(u8))
+    :: new_string *u8 = alloc(new_size * sizeof(u8))
 
-    i64 :: index = 0
+    :: index i64 = 0
     // FIXME: can't use FOR WHILE here due to compiler bug with a.len
-    for i64::k = 0; index < a.len; index = index + 1 {
+    for ::k i64 = 0; index < a.len; index = index + 1 {
         new_string[index] = a.str[index]
     }
     
-    for i64::i = 0; i < new_size; i = i + 1 {
+    for ::i i64 = 0; i < new_size; i = i + 1 {
         new_string[index] = b.str[i]
         index = index + 1
     }
@@ -67,14 +67,14 @@ fn join(string a, string b) -> string {
     -> ret
 }
 
-fn puts(string a) {
-    for i64::i = 0; i < a.len; i = i + 1 {
+puts fn(a string) {
+    for ::i i64 = 0; i < a.len; i = i + 1 {
         putchar(a.str[i])
     }
 }
 
-fn puti(i64 number) {
-    i64 :: divisor = 1
+puti fn(number i64) {
+    :: divisor i64 = 1
 
     //TODO: make this more efficient once you can make arrays
     // Find the divisor to extract the leftmost digit
@@ -84,8 +84,8 @@ fn puti(i64 number) {
 
     // Extract and print each digit
     for divisor > 0 {
-        i64 :: integer = number / divisor
-        u8 :: c = '9'
+        :: integer i64 = number / divisor
+        :: c u8 = '9'
         if integer == 0 {
             c = '0'
         } else if integer == 1 {

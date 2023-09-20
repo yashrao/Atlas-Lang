@@ -1,8 +1,8 @@
 include "std.atl"
 
-fn main() -> i64 {
-    string :: test_a = "test"
-    string :: test_b = "test"
+main fn() -> i64 {
+    :: test_a string = "test"
+    :: test_b string = "test"
     puts("test_a: ")
     puts(test_a)
     putchar('\n')
@@ -17,7 +17,7 @@ fn main() -> i64 {
     puti(test_a.len)
     putchar('\n')
 
-    string :: test_c = ""
+    :: test_c string = ""
     test_c = join(test_a, test_b)
     putchar('\n')
     puts(test_c)

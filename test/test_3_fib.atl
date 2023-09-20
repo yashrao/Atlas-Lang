@@ -1,6 +1,6 @@
 include "std.atl"
 
-fn fib (i64 num) -> i64 {
+fib fn(num i64) -> i64 {
     if num == 0 {
         -> 0
     } else if num == 1 {
@@ -10,8 +10,9 @@ fn fib (i64 num) -> i64 {
     }
 }
 
-fn main() -> i64 {
-    i64 :: res = fib(10)
+main fn() -> i64 {
+    :: res i64 = fib(10)
     puti(res)
     -> 0
 }
+
