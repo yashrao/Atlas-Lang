@@ -77,10 +77,8 @@ enum TokenType {
     TK_PERCENT,
     TK_CHAR,
     TK_INCLUDE,
-    TK_NEW, // am I using these?
-    TK_FREE,// am I using these?
     TK_PTR_DEREFERENCE,
-    TK_DOT_CURLY
+    TK_DOT_CURLY,
 };
 
 enum ForType {
@@ -155,6 +153,8 @@ struct VarNode : Node {
 };
 
 struct VarDeclNode : Node {
+    bool is_const  = false;
+    bool is_static = false;
     VarType type;
     VarNode* lhs;
     struct ExpressionNode* rhs;
@@ -1616,6 +1616,43 @@ VarDeclNode* ast_handle_var_decl_lhs(std::vector<Token*> tokens, int* i) {
     return lhs;
 }
 
+VarDeclNode* ast_handle_var_decl(std::vector<Token*> tokens, int* i, bool has_atrs) {
+    Token* current_token = tokens[*i]; // update token
+    bool is_static, is_const = false;
+    if(has_atrs) {
+        // collect attributes first
+        while(current_token->tt != TK_DOUBLE_C) {
+            if (current_token->tt == TK_COMMA) {
+                current_token = next_token(tokens, i);
+                continue;
+            }
+            expect(current_token, TK_IDENTIFIER);
+            if (current_token->token == "static") {
+                is_static = true;
+            } else if (current_token->token == "const") {
+                is_const = true;
+            } else {
+                std::string err = "Invalid attribute: " + current_token->token;
+                print_error_msg(err);
+                exit(1);
+            }
+            current_token = next_token(tokens, i);
+        }
+    }
+    VarDeclNode* lhs = ast_handle_var_decl_lhs(tokens, i);
+    lhs->is_static = is_static;
+    lhs->is_const = is_const;
+    current_token = tokens[*i]; // update token
+    expect(current_token, TK_ASSIGN);
+    current_token = next_token(tokens, i);
+    ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
+    lhs->rhs = rhs;
+    if (lhs->lhs->is_array && rhs->nt == NODE_SUBSCRIPT) {
+        rhs->subscript->is_declaration = true;
+    }
+    return lhs;
+}
+
 StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i) {
     StatementNode* stmt = new StatementNode;
     // assume starts at the beginning of the line
@@ -1625,28 +1662,23 @@ StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i) {
         int save_beg = *i; // incase its an expression
         if(tt == TK_DOUBLE_C) {
             // var_decl
-            if (tokens[*i - 1]->tt == TK_FOR) {
-                //exit(50);
-            }
-            //expect(current_token, TK_IDENTIFIER);
-            VarDeclNode* lhs = ast_handle_var_decl_lhs(tokens, i);
-            current_token = tokens[*i]; // update token
-            expect(current_token, TK_ASSIGN);
-            current_token = next_token(tokens, i);
-            ExpressionNode* rhs = ast_create_expression(tokens, false, false, false, i);
-            lhs->rhs = rhs;
-            if (lhs->lhs->is_array && rhs->nt == NODE_SUBSCRIPT) {
-                rhs->subscript->is_declaration = true;
-            }
-            //VarDeclNode* lhs = ast_create_var_decl(get_var_type(type), type, id, rhs);
+            VarDeclNode* var_decl = ast_handle_var_decl(tokens, i, false);
             StatementNode* statement = new StatementNode;
             statement->nt = NODE_VAR_DECL;
-            statement->vardecl_lhs = lhs;
-            statement->expr_rhs = rhs;
+            statement->vardecl_lhs = var_decl;
+            statement->expr_rhs = var_decl->rhs;
             return statement;
         } else if (current_token->tt == TK_IDENTIFIER) {
             Token* lookahead = ast_get_lookahead(tokens, i);
-            if (lookahead->tt == TK_FN) {
+            if (lookahead->tt == TK_COMMA || lookahead->tt == TK_DOUBLE_C) {
+                // var_decl
+                VarDeclNode* var_decl = ast_handle_var_decl(tokens, i, true);
+                StatementNode* statement = new StatementNode;
+                statement->nt = NODE_VAR_DECL;
+                statement->vardecl_lhs = var_decl;
+                statement->expr_rhs = var_decl->rhs;
+                return statement;
+            } else if (lookahead->tt == TK_FN) {
                 // Function
                 FunctionNode* fn = ast_create_function(tokens, i);
                 StatementNode* stmt = new StatementNode;
@@ -1728,10 +1760,10 @@ std::vector<StatementNode*> ast_create(std::vector<Token*> tokens) {
 }
 
 void atlas_lib(std::ofstream* file) {
-    *file << "#include <mimalloc.h>\n";
-
     *file << "extern int open(const char* filename, int flags, int mode);\n";
     *file << "extern int close(int fileds);\n";
+    *file << "extern void* malloc(long unsigned int size);\n";
+    *file << "extern void free(void* ptr);\n";
     
     //TODO: might not need this part lol
     *file << "#define SYSCALL_EXIT 60\n"
@@ -1747,6 +1779,7 @@ void atlas_lib(std::ofstream* file) {
           << "typedef unsigned int uint;\n"
           << "typedef long long int64;\n"
           << "typedef unsigned long long uint64;\n"
+          << "typedef enum { false, true } bool;\n"
           << "#define true 1\n"
           << "#define false 0\n";
 
@@ -1829,8 +1862,7 @@ void codegen_end_libc(std::ofstream* file, std::string backend) {
 
     //TODO: get rid of this mimalloc string?
     //      for some reason it doesn't link properly on my machine
-    std::string mimalloc = " mimalloc/out/release/mimalloc.o -I mimalloc/include/ ";
-    std::string command = backend + mimalloc + "out.c -o " + output_file_path;
+    std::string command = backend + " out.c -o " + output_file_path;
     log_print("Running \"" + command + "\"\n");
     // Compile C code
     int ret = std::system(command.c_str());
@@ -1862,9 +1894,9 @@ std::string codegen_get_intrinsic_name(std::string name) {
     if (name == "putchar") {
         return "atlas_putchar";
     } else if (name == "alloc") {
-        return "mi_malloc";
+        return "malloc";
     } else if (name == "free") {
-        return "mi_free";
+        return "free";
     } else if (name == "open") {
         return "open";
     } else if (name == "close") {
@@ -2145,6 +2177,12 @@ bool codegen_is_c_type(Token* atlas_type) {
 }
 
 void codegen_var_decl(VarDeclNode* var_decl, std::ofstream* file) {
+    if (var_decl->is_static) {
+        *file << "static ";
+    }
+    if (var_decl->is_const) {
+        *file << "const ";
+    }
     // lhs
     if (codegen_is_c_type(var_decl->lhs->type_)) {
         *file << codegen_get_c_type(var_decl->lhs->type_);
@@ -2358,6 +2396,9 @@ void codegen_start(std::vector<StatementNode*> ast, std::string filename, std::s
             codegen_type(node->type_lhs, &file);
         } else if (node->nt == NODE_CALL) {
             codegen_expr(node->expr_lhs, &file);
+        } else if (node->nt == NODE_VAR_DECL) {
+            codegen_var_decl(node->vardecl_lhs, &file);
+            file << ";\n";
         }
     }
     codegen_init_c(ast, &file);
@@ -2472,6 +2513,7 @@ int main(int argc, char** argv) {
     } else {
         BACKEND = "gcc";
     }
+    //BACKEND = "clang";
 
     std::string src = read_file(state->input_filename);
     log_print(src + "\n");

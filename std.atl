@@ -8,15 +8,21 @@ string type {
     len u64
 }
 
-:: O_RDONLY u64 = 0
-:: O_CREATE u64 = 4
-:: O_TRUNC  u64 = 16
+const :: O_RDONLY u64 = 0
+const :: O_CREATE u64 = 4
+const :: O_TRUNC  u64 = 16
 
+// Why did I even write this lol
 strlen fn(str *u8) -> u64 {
     :: len u64 = 0
     for ::i i64 = 0; i < len; i = i + 1 {
         len = len + 1
     }
+}
+
+// not sure if it does what I think it does lol
+copy_str fn(og_string string) -> string {
+	//-> atlas_create_string(og_string.str, og_string.size)
 }
 
 atlas_create_string fn(str *u8, len u64) -> string {
