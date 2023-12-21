@@ -77,6 +77,7 @@ enum TokenType {
     TK_PERCENT,
     TK_CHAR,
     TK_INCLUDE,
+    TK_CINCLUDE,
     TK_PTR_DEREFERENCE,
     TK_DOT_CURLY,
 };
@@ -133,6 +134,7 @@ enum NodeType {
     NODE_SUBSCRIPT,
     NODE_MEMBER_ACCESS,
     NODE_TYPE_INST,
+    NODE_CINCLUDE,
 };
 
 struct Node {
@@ -217,7 +219,12 @@ struct ArrayNode : Node {
     std::vector<ExpressionNode*> elements;
 };
 
+struct CincludeNode : Node {
+    Token* name;
+};
+
 struct ExpressionNode : Node {
+    bool needs_paren = false;
     union {
         BinaryOpNode* binop;
         ConstantNode* constant;
@@ -229,6 +236,7 @@ struct ExpressionNode : Node {
         QuoteNode* quote;
         SubscriptNode* subscript;
         TypeInstNode* type_inst;
+        CincludeNode* cinclude;
     };
 };
 
@@ -282,6 +290,7 @@ struct StatementNode : Node {
         IfNode* if_lhs;
         ForNode* for_lhs;
         TypeNode* type_lhs;
+        CincludeNode* cinclude_lhs;
     };
     // RHS
     union {
@@ -387,6 +396,8 @@ const char* get_tt_str(TokenType tt) {
         return "TK_CHAR";
     } else if (tt == TK_INCLUDE) {
         return "TK_INCLUDE";
+    } else if (tt == TK_CINCLUDE) {
+        return "TK_CINCLUDE";
     } else if (tt == TK_DOT_CURLY) {
         return "TK_DOT_CURLY";
     } else {
@@ -438,6 +449,8 @@ std::string get_nt_str(NodeType nt) {
         return "NODE_MEMBER_ACCESS";
     case NODE_TYPE_INST:
         return "NODE_TYPE_INST";
+    case NODE_CINCLUDE:
+        return "NODE_CINCLUDE";
     default:
         return "NODE_INVALID";
     }
@@ -583,6 +596,8 @@ TokenType tokenize_get_reserved_word(std::string word) {
         return TK_TYPE;    
     } else if (word == "include") {
         return TK_INCLUDE;
+    } else if (word == "cinclude") {
+        return TK_CINCLUDE;
     } else if (word == "fn") {
         return TK_FN;
     } else {
@@ -1104,6 +1119,7 @@ bool is_op_binary(Token* op) {
     case TK_SQUARE_OPEN:
         return true;
     case TK_NOT:
+    case TK_PTR_DEREFERENCE:
         return false;
     default:
         std::string err = "\"" + op->token + "\" is not a valid operator";
@@ -1141,6 +1157,15 @@ ast_create_expr_prec(
         lhs = ast_create_type_instantiation(tokens, i);
     } else if (current_token->tt == TK_CHAR) {
         lhs = ast_create_char(tokens[*i]);
+    } else if (current_token->tt == TK_PAREN_OPEN) {
+        current_token = next_token(tokens, i);
+        //lhs = ast_create_expr_prec(tokens, get_prec(TK_PAREN_OPEN),
+        //                           false, false, false, i);
+        lhs = ast_create_expression(tokens, false, false, false, i);
+        lhs->needs_paren = true;
+        current_token = next_token(tokens, i);
+        expect(current_token, TK_PAREN_CLOSE);
+        //current_token = next_token(tokens, i);
     } else {
         print_error_msg("Invalid token for lhs in ast_get_expr_prec\n");
         print_token(current_token);
@@ -1166,7 +1191,8 @@ ast_create_expr_prec(
         // only for var_decl
         (*i)++; // Throw away closed square bracket
         return lhs;
-    } else if (is_arr && (current_token->tt == TK_COMMA) || (lookahead->tt == TK_COMMA)) {
+    } else if (is_arr && (current_token->tt == TK_COMMA)
+               || (lookahead->tt == TK_COMMA)) {
         (*i)++; // Now token should be on ']' or ','
         return lhs;
     }
@@ -1450,6 +1476,17 @@ BlockNode* ast_create_block(std::vector<Token*> tokens, int* i) {
             auto tokens = tokenize(src);
             auto ast = ast_create(tokens);
             statements.insert(statements.end(), ast.begin(), ast.end());
+        } else if (tt == TK_CINCLUDE) {
+            current_token = next_token(tokens, i); // skip cinclude token
+            // Current token should be a string
+            expect(current_token, TK_QUOTE);
+            StatementNode* statement = new StatementNode;
+            CincludeNode* cinclude = new CincludeNode;
+            cinclude->name = current_token;
+
+            statement->nt = NODE_CINCLUDE;
+            statement->cinclude_lhs = cinclude;
+            statements.push_back(statement);
         } else {
             statements.push_back(ast_create_declaration(tokens, i));
         }
@@ -1668,6 +1705,17 @@ StatementNode* ast_create_declaration(std::vector<Token*> tokens, int* i) {
             statement->vardecl_lhs = var_decl;
             statement->expr_rhs = var_decl->rhs;
             return statement;
+        } else if (tt == TK_CINCLUDE) {
+            current_token = next_token(tokens, i); // skip cinclude token
+            // Current token should be a string
+            expect(current_token, TK_QUOTE);
+            StatementNode* statement = new StatementNode;
+            CincludeNode* cinclude = new CincludeNode;
+            cinclude->name = current_token;
+
+            statement->nt = NODE_CINCLUDE;
+            statement->cinclude_lhs = cinclude;
+            return statement;
         } else if (current_token->tt == TK_IDENTIFIER) {
             Token* lookahead = ast_get_lookahead(tokens, i);
             if (lookahead->tt == TK_COMMA || lookahead->tt == TK_DOUBLE_C) {
@@ -1811,6 +1859,7 @@ void atlas_lib(std::ofstream* file) {
 }
 
 void codegen_init_c(std::vector<StatementNode*> ast, std::ofstream* file) {
+    // TODO: going to be dependent on libc for some time lol
     #ifndef DEPEND_LIBC
 	*file << "void _start(void)\n"
           << "{\n"
@@ -1991,10 +2040,13 @@ void codegen_char(CharacterNode* character, std::ofstream* file) {
 }
 
 void codegen_quote(QuoteNode* quote, std::ofstream* file) {
+    /*
     *file << "atlas_create_string("
           << "\"" << quote->quote_token->token << "\""
           << ","  << quote->quote_token->token.size()
           << ")";
+    */
+    *file << "\"" << quote->quote_token->token << "\"";
 }
 
 void codegen_subscript(SubscriptNode* subscript, std::ofstream* file) {
@@ -2047,6 +2099,9 @@ void codegen_unary_op(UnaryOpNode* unary_op, std::ofstream* file) {
 
 void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
     file->flush();
+    if(expression->needs_paren) {
+        *file << "(";
+    }
     switch(expression->nt) {
     case NODE_BINOP:
         codegen_expr(expression->binop->lhs, file);
@@ -2116,6 +2171,9 @@ void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
         print_error_msg(err);
         std::cout << expression->nt;
         exit(1);
+    }
+    if(expression->needs_paren) {
+        *file << ")";
     }
 }
 
@@ -2399,6 +2457,10 @@ void codegen_start(std::vector<StatementNode*> ast, std::string filename, std::s
         } else if (node->nt == NODE_VAR_DECL) {
             codegen_var_decl(node->vardecl_lhs, &file);
             file << ";\n";
+        } else if (node->nt == NODE_CINCLUDE) {
+            file << "#include <";
+            file << node->cinclude_lhs->name->token;
+            file << ">\n";
         }
     }
     codegen_init_c(ast, &file);
@@ -2508,7 +2570,8 @@ int main(int argc, char** argv) {
     global_state = state;
     std::string BACKEND;
     if (state->debug) {
-        std::cout << "[INFO]: Debug Mode is enabled";
+        std::cout << "[INFO]: Debug Mode is enabled\n";
+        //BACKEND = "gcc -fcompare-debug-second -w ";
         BACKEND = "gcc -fcompare-debug-second -w ";
     } else {
         BACKEND = "gcc";
