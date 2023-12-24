@@ -273,6 +273,7 @@ struct FunctionNode : Node {
     struct BlockNode* block;
     Token* return_types;
     bool is_prototype;
+    std::string mangled_name;
 };
 
 struct ReturnNode : Node {
@@ -318,6 +319,8 @@ VarType get_var_type(Token* var_type);
 std::string codegen_get_c_type(Token* atlas_type);
 
 static State* global_state = NULL;
+
+static std::vector<FunctionNode*> function_table; // "table"
 
 const char* get_tt_str(TokenType tt) {
     if (tt == TK_NEWLINE) {
@@ -1560,6 +1563,37 @@ TypeNode* ast_create_type_struct(std::vector<Token*> tokens, int* i) {
     return type_node;
 }
 
+void ast_name_mangler(FunctionNode* function) {
+    std::string og_name = function->token->token;
+
+    std::string type;
+    if (function->return_types == NULL) {
+        type = "v";
+    } else if (function->return_types->token == "i64") {
+        type = "x";
+    } else if (function->return_types->token == "u64") {
+        type = "y";
+    } else if (function->return_types->token == "i32") {
+        type = "i";
+    } else if (function->return_types->token == "u32") {
+        type = "j";
+    } else if (function->return_types->token == "i16") {
+        type = "s";
+    } else if (function->return_types->token == "u16") {
+        type = "t";
+    } else if (function->return_types->token == "i8") {
+        type = "Dh";
+    } else if (function->return_types->token == "u8") {
+        type = "h";
+    } else {
+        type = std::to_string(function->return_types->token.length())
+            + function->return_types->token;
+    }
+    
+    function->mangled_name = "Z_" + std::to_string(og_name.length())
+                             + og_name + type;
+}
+
 FunctionNode* ast_create_function(std::vector<Token*> tokens, int* i) {
     FunctionNode* ret = new FunctionNode;
 
@@ -1601,6 +1635,12 @@ FunctionNode* ast_create_function(std::vector<Token*> tokens, int* i) {
         }
     }
     ret->block = block;
+    if(ret->token->token != "main") {
+        ast_name_mangler(ret);
+    } else {
+        ret->mangled_name = "main";
+    }
+    function_table.push_back(ret);
     return ret;
 }
 
@@ -2040,13 +2080,12 @@ void codegen_char(CharacterNode* character, std::ofstream* file) {
 }
 
 void codegen_quote(QuoteNode* quote, std::ofstream* file) {
-    /*
-    *file << "atlas_create_string("
+    //*file << "atlas_create_string("
+    *file << "Z_19atlas_create_string6string("
           << "\"" << quote->quote_token->token << "\""
           << ","  << quote->quote_token->token.size()
           << ")";
-    */
-    *file << "\"" << quote->quote_token->token << "\"";
+    //*file << "\"" << quote->quote_token->token << "\"";
 }
 
 void codegen_subscript(SubscriptNode* subscript, std::ofstream* file) {
@@ -2097,6 +2136,18 @@ void codegen_unary_op(UnaryOpNode* unary_op, std::ofstream* file) {
     }
 }
 
+std::string codegen_get_call_mangled(std::string name) {
+    for (FunctionNode* func : function_table) {
+        if (func->token->token == name) {
+            return func->mangled_name;
+        } else if (codegen_is_intrinsic_function(name)) {
+            return codegen_get_intrinsic_name(name);
+        }
+    }
+    // just return the original name if not found for whatever reason
+    return name;
+}
+
 void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
     file->flush();
     if(expression->needs_paren) {
@@ -2121,12 +2172,10 @@ void codegen_expr(ExpressionNode* expression, std::ofstream* file) {
         break;
     case NODE_CALL:
     {
-        std::string call_name = expression->call_node->name->token;
-        if (codegen_is_intrinsic_function(call_name)) {
-            *file << codegen_get_intrinsic_name(call_name) << "(";
-        } else {
-            *file << expression->call_node->name->token << "("; 
-        }
+        //std::string call_name = expression->call_node->name->token;
+        std::string call_name = codegen_get_call_mangled(expression->call_node->name->token);
+
+        *file << call_name << "("; 
         auto args = expression->call_node->args;
         for (int i = 0; i < args.size(); i++) {
             codegen_expr(args[i], file);
@@ -2401,7 +2450,8 @@ void codegen_func(FunctionNode* func, std::ofstream* file) {
     } else {
         *file << codegen_get_c_type(func->return_types) << " ";
     }
-    *file << func->token->token << "(";
+    //*file << func->token->token << "(";
+    *file << func->mangled_name << "(";
     bool add_comma = true;
     // Args
     for (int i = 0; i < func->params.size(); i++) {
@@ -2562,7 +2612,7 @@ void run_program(std::string output_file_path) {
 int main(int argc, char** argv) {
     if (argc == 1) {
         //TODO: print a usage
-        std::cout << "atlas: " << CL_RED << "error:" << CL_RESET <<" no input files";
+        std::cout << "atlas: " << CL_RED << "error:" << CL_RESET <<" no input files\n";
         return 1;
     }
 
@@ -2571,9 +2621,10 @@ int main(int argc, char** argv) {
     std::string BACKEND;
     if (state->debug) {
         std::cout << "[INFO]: Debug Mode is enabled\n";
-        //BACKEND = "gcc -fcompare-debug-second -w ";
         BACKEND = "gcc -fcompare-debug-second -w ";
+        //BACKEND = "g++ -fcompare-debug-second -w ";
     } else {
+        //BACKEND = "g++";
         BACKEND = "gcc";
     }
     //BACKEND = "clang";
